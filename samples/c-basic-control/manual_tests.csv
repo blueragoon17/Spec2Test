@@ -1,0 +1,10 @@
+id,unit,method,input,expected,reviewState
+MT-DIV-001,safe_divide,manual,"a=10;b=2;out=&value","return=0;out=5",specified
+MT-DIV-002,safe_divide,boundary,"a=10;b=0;out=&value","return=-1;out=0",specified
+MT-DIV-003,safe_divide,undefined_behavior_corner,"a=INT_MIN;b=-1;out=&value","return=-3;out=0",specified
+MT-CLAMP-001,clamp_percent,boundary,"value=-1","return=0",specified
+MT-CLAMP-002,clamp_percent,boundary,"value=100","return=100",specified
+MT-CLAMP-003,clamp_percent,equivalence_partition,"value=55","return=55",specified
+MT-MODE-001,update_mode,state_transition,"current=MODE_LOCKED;event=EVENT_CORRECT_PIN;retry_count=0","return=MODE_UNLOCKED",specified
+MT-MODE-002,update_mode,state_transition,"current=MODE_LOCKED;event=EVENT_WRONG_PIN;retry_count=3","return=MODE_ALARM",specified
+MT-MODE-003,update_mode,state_transition,"current=MODE_ALARM;event=EVENT_TIMEOUT;retry_count=0","return=MODE_LOCKED",specified

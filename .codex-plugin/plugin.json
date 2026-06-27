@@ -1,0 +1,59 @@
+{
+  "name": "perfectone-unit-verify",
+  "version": "0.2.0-beta.1",
+  "description": "Open Plugin Beta for C coverage/assertion verification with PerfectOne, source-derived C design drafts, filtered KLEE/MC/DC, and Coding Agent residual reporting.",
+  "author": {
+    "name": "PerfectOne"
+  },
+  "homepage": "https://github.com/blueragoon17/Spec2Test",
+  "repository": "https://github.com/blueragoon17/Spec2Test",
+  "license": "LicenseRef-Spec2Test-Open-Plugin-Beta",
+  "keywords": [
+    "perfectone",
+    "unit-test",
+    "test-design",
+    "source-derived",
+    "requirements",
+    "oracle",
+    "assertion",
+    "coverage",
+    "mcp",
+    "c"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Spec2Test",
+    "shortDescription": "C coverage/assertion beta through Docker-first PerfectOne",
+    "longDescription": "Spec2Test currently ships as a C-centered Open Plugin Beta. For C targets it connects Codex to an externally provisioned PerfectOne CLI through MCP for split/stub/harness generation, source-target-filtered Docker KLEE baseline execution, MC/DC coverage evidence, Windows local LLVM/lld-link residual native replay and coverage aggregation, source-derived C design drafts, testcase I/O evidence, UB/ASAN interpretation, coverage limit pages, and polished HTML reports. WSL execution is disabled in this plugin path due to artifact synchronization overhead. Non-C execution entrypoints are temporarily disabled in this beta deployment. Embedded C targets are not validated yet and require explicit toolchain context.",
+    "developerName": "PerfectOne",
+    "category": "Engineering",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/blueragoon17/Spec2Test",
+    "privacyPolicyURL": "https://github.com/blueragoon17/Spec2Test/blob/main/NOTICE",
+    "termsOfServiceURL": "https://github.com/blueragoon17/Spec2Test/blob/main/LICENSE",
+    "defaultPrompt": [
+      "Use PerfectOne to verify C unit coverage for this project",
+      "Create C unit test designs from this specification",
+      "Generate C manual testcase seeds, decision tables, state-transition tests, boundary values, and equivalence partitions from a specification",
+      "Reverse-recommend a draft C unit design from source code",
+      "Generate a VSCode-template-based Unit Design Markdown document when no specification is provided",
+      "Temporarily block non-C verification entrypoints with non_c_temporarily_disabled",
+      "Generate decision table, state coverage, boundary value, equivalence partition, assertion, and oracle artifacts",
+      "Render an HTML review report for manual testcases, assertions, expected values, and traceability",
+      "Run C unit verification and improve uncovered functions",
+      "Run filtered KLEE and MC/DC for C before Codex residual repair",
+      "Use Windows PerfectOne CLI with Docker as the default Windows C KLEE runner",
+      "Detect OS-specific compiler, coverage, and embedded target toolchain setup requirements",
+      "Report missing PerfectOne CLI, Docker, compiler, coverage, and embedded target prerequisites without building them from the skill workflow",
+      "Diagnose C native unit coverage errors and repair residual coverage with the Coding Platform",
+      "Run AgentTest-style PM, Test Designer, Tester, and QA C unit coverage workflow",
+      "Create a polished standalone HTML unit verification report"
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

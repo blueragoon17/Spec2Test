@@ -1,0 +1,22 @@
+# Spec2Test Notices
+
+Spec2Test is an Open Plugin Beta distribution for PerfectOne-based C unit
+verification workflows.
+
+The repository intentionally excludes PerfectOne CLI binaries and PerfectOne
+engine source code. Users must provide a compatible `ClangParserForWin.exe`
+or platform-specific PerfectOne CLI binary separately.
+
+`samples/c-input04-complex/sample1.c` is included as a user-provided complex C
+stress sample derived from `C:\Development\TestSuite\input04\input04.c`.
+The file is included for beta evaluation and regression testing of C coverage,
+residual harness generation, UB/ASAN reporting, and HTML report generation.
+
+The beta is focused on Windows C workflows:
+
+- Docker runs source-target filtered KLEE baseline execution.
+- Windows LLVM/lld-link runs local residual native replay and MC/DC coverage.
+- WSL execution is disabled for this plugin path.
+- Non-C workflows are temporarily disabled in this beta plugin deployment.
+- Embedded C workflows are not validated yet and require explicit target
+  compiler, sysroot, linker, and build context before any execution.

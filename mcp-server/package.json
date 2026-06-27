@@ -1,0 +1,18 @@
+{
+  "name": "perfectone-unit-verify-mcp",
+  "version": "0.2.0-beta.1",
+  "type": "module",
+  "private": true,
+  "description": "MCP stdio wrapper for source-derived unit design artifacts and PerfectOne C verification commands.",
+  "bin": {
+    "perfectone-unit-verify-mcp": "./src/server.js"
+  },
+  "scripts": {
+    "start": "node ./src/server.js",
+    "check": "node --check ./src/server.js",
+    "test:filter": "node ./test/filter-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

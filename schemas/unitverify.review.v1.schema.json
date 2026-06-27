@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/blueragoon17/Spec2Test/schemas/unitverify.review.v1.schema.json",
+  "title": "Language Independent Unit Verify Review State",
+  "type": "object",
+  "required": ["schemaVersion", "items"],
+  "properties": {
+    "schemaVersion": { "const": "unitverify.review.v1" },
+    "reviewId": { "type": "string" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["artifactType", "artifactId", "reviewStatus"],
+        "properties": {
+          "artifactType": { "type": "string" },
+          "artifactId": { "type": "string" },
+          "reviewStatus": {
+            "enum": ["specified", "inferred", "missing", "needs_review", "approved", "rejected"]
+          },
+          "reviewerNote": { "type": "string" },
+          "evidence": { "type": "string" },
+          "updatedAt": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

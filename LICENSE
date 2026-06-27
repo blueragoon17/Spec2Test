@@ -1,0 +1,19 @@
+Spec2Test Open Plugin Beta License
+
+Copyright (c) 2026 PerfectOne.
+
+This repository is published as an Open Plugin Beta for review, integration,
+and evaluation with Codex-compatible MCP/Skill plugin hosts.
+
+You may read, clone, run, and submit pull requests for the plugin code,
+schemas, scripts, documentation, and sample files in this repository.
+
+You may not sell, sublicense, repackage, or redistribute this repository as a
+commercial product without written permission from the copyright holder.
+
+The PerfectOne CLI, PerfectOne verification engine, and any proprietary
+runtime binaries are not licensed by this repository. They must be obtained
+and used under their own separate license terms.
+
+This beta software is provided "as is", without warranty of any kind. Embedded
+target verification is not validated in this beta release.

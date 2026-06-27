@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/blueragoon17/Spec2Test/schemas/perfectone.unitverify.report.v1.schema.json",
+  "title": "PerfectOne Unit Verify Report",
+  "type": "object",
+  "required": ["schemaVersion", "runId", "status", "coverage", "functions", "artifacts", "diagnostics", "recommendedActions"],
+  "properties": {
+    "schemaVersion": {
+      "const": "perfectone.unitverify.report.v1"
+    },
+    "runId": {
+      "type": "string"
+    },
+    "status": {
+      "enum": ["passed", "coverage_unmet", "failed"]
+    },
+    "coverage": {
+      "type": "object",
+      "properties": {
+        "line": {
+          "type": ["number", "null"]
+        },
+        "branch": {
+          "type": ["number", "null"]
+        },
+        "mcdc": {
+          "type": ["number", "boolean", "null"]
+        }
+      },
+      "required": ["line", "branch", "mcdc"],
+      "additionalProperties": false
+    },
+    "functions": {
+      "type": "array"
+    },
+    "artifacts": {
+      "type": "array"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "code", "message"],
+        "properties": {
+          "severity": {
+            "enum": ["info", "warning", "error"]
+          },
+          "code": {
+            "type": "string",
+            "description": "Known MCP-normalized codes include coverage_not_measured, blocked_compile_context, blocked_missing_include, local_compile_environment_incomplete, local_tool_missing, needs_toolchain_setup, target_toolchain_context_required, and target_scope_unverified. Other CLI-specific codes remain valid for backward compatibility."
+          },
+          "message": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "blocking": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "recommendedActions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "functionReports": {
+      "type": "array",
+      "description": "Function-level report drafts produced from CLI report functions and/or IR/split/harness artifacts.",
+      "items": {
+        "type": "object",
+        "required": ["symbol", "coverageStatus", "diagnostics"],
+        "properties": {
+          "file": {
+            "type": ["string", "null"]
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "language": {
+            "type": ["string", "null"]
+          },
+          "splitSource": {
+            "type": ["string", "null"]
+          },
+          "stubSource": {
+            "type": ["string", "null"]
+          },
+          "stubHeader": {
+            "type": ["string", "null"]
+          },
+          "harnesses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "perfectOneArtifacts": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "codingPlatformActions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "codingPlatformPrompt": {
+            "type": "string"
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "coverage": {
+            "type": "object"
+          },
+          "coverageStatus": {
+            "type": "string"
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "verdict": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "localToolchain": {
+      "type": "object",
+      "description": "Local compiler, coverage, build, and Docker probe results gathered by the MCP wrapper.",
+      "additionalProperties": true
+    },
+    "toolchainEnvironment": {
+      "type": "object",
+      "description": "Host/target OS, language-native toolchain probes, build metadata, setup prompt, and blocking diagnostics gathered by the MCP wrapper.",
+      "additionalProperties": true
+    },
+    "compileContextHints": {
+      "type": "array",
+      "description": "Missing include or system header hints intended to help the Coding Platform repair local compile context.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "header": {
+            "type": "string"
+          },
+          "classification": {
+            "type": "string"
+          },
+          "candidatePaths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "includeDirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "mcpInjectedCompileContext": {
+      "type": "object",
+      "description": "Compile DB/include context inferred by the MCP wrapper, such as Windows SDK/MSVC, Linux/macOS compiler system includes, embedded sysroot/toolchain inputs, or Juliet testcasesupport includes when the request did not provide compileDb.",
+      "additionalProperties": true
+    },
+    "mcpTargetFunctionFilter": {
+      "type": "object",
+      "description": "Function selection inferred by the MCP wrapper to keep functions.mode=all scoped to functions declared in the requested source file rather than system/support headers.",
+      "additionalProperties": true
+    },
+    "codingPlatformActions": {
+      "type": "array",
+      "description": "Next actions intended for Codex/Coding Platform when PerfectOne artifacts need native test or coverage completion.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "codingPlatformPrompt": {
+      "type": "string",
+      "description": "A direct prompt that a Coding Platform can use to continue from MCP artifacts, diagnostics, and local coverage requirements."
+    },
+    "diagnosticSummary": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "unitDesignArtifacts": {
+      "type": "object",
+      "description": "Language-independent spec-analysis, test-design, assertion, oracle, traceability, and review artifacts referenced by this verification run.",
+      "additionalProperties": true
+    },
+    "expectedComparison": {
+      "type": "object",
+      "description": "Expected/actual comparison summary produced from unitverify.oracle.v1 artifacts.",
+      "additionalProperties": true
+    },
+    "traceability": {
+      "type": "object",
+      "description": "Requirement-to-design-to-test-to-coverage traceability summary.",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

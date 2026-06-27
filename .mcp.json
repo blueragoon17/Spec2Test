@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "perfectone-unit-verify": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "./mcp-server/src/server.js"
+      ],
+      "env": {
+        "PERFECTONE_WORKSPACE_ROOT": "."
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/blueragoon17/Spec2Test/schemas/unitverify.spec-analysis.v1.schema.json",
+  "title": "Language Independent Unit Verify Spec Analysis",
+  "type": "object",
+  "required": ["schemaVersion", "requirements"],
+  "properties": {
+    "schemaVersion": { "const": "unitverify.spec-analysis.v1" },
+    "analysisId": { "type": "string" },
+    "sourceDocuments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "title": { "type": "string" },
+          "kind": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["requirementId", "text", "reviewStatus"],
+        "properties": {
+          "requirementId": { "type": "string" },
+          "text": { "type": "string" },
+          "sourceRef": { "type": "string" },
+          "evidence": { "type": "string" },
+          "reviewStatus": { "$ref": "#/$defs/reviewStatus" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": true
+      }
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["unitId", "reviewStatus"],
+        "properties": {
+          "unitId": { "type": "string" },
+          "language": { "type": "string" },
+          "file": { "type": "string" },
+          "symbol": { "type": "string" },
+          "inputs": { "type": "array" },
+          "outputs": { "type": "array" },
+          "states": { "type": "array" },
+          "constraints": { "type": "array" },
+          "reviewStatus": { "$ref": "#/$defs/reviewStatus" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "assumptions": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+  },
+  "$defs": {
+    "reviewStatus": {
+      "enum": ["specified", "inferred", "missing", "needs_review", "approved", "rejected"]
+    }
+  },
+  "additionalProperties": true
+}
