@@ -80,7 +80,7 @@ try {
   const result = validate();
   if (!result) throw new Error("missing validation result");
   if (result.status !== "blocked") throw new Error(`expected retry gate to block, got ${JSON.stringify(result)}`);
-  if (!result.blockers?.includes("aggregate_residual_attempts_below_required")) {
+  if (!result.blockers?.includes("residual_repair_attempts_without_measured_generated_artifact_changes")) {
     throw new Error(`missing aggregate retry blocker: ${JSON.stringify(result)}`);
   }
   if (result.aggregateAttemptCount !== 2) {

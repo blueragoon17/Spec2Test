@@ -79,7 +79,10 @@ try {
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     writeFileSync(path.join(residualDir, `residual_attempt${attempt}.c`), `/* generated attempt ${attempt} */\n`);
     writeFileSync(path.join(residualDir, `residual_attempt${attempt}_report.txt`), `attempt ${attempt} report\n`);
-    writeFileSync(path.join(residualDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({ attempt }));
+    writeFileSync(path.join(residualDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({
+      attempt,
+      afterCoverage: { line: 80 + attempt, branch: 70 + attempt, function: 90, mcdc: 40 }
+    }));
   }
   writeFileSync(path.join(residualDir, "tdmain_probe.profraw"), "");
   writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
@@ -93,13 +96,17 @@ try {
   const result = runValidate();
   if (!result) throw new Error("missing validation result");
   if (result.status !== "blocked") throw new Error(`expected partial target classification to stay blocked, got ${JSON.stringify(result)}`);
-  if (!result.blockers?.includes("residual_targets_without_attempt_history")) {
-    throw new Error(`expected missing target blocker for partial aggregate evidence, got ${JSON.stringify(result)}`);
-  }
-  if (result.aggregateEvidenceSatisfied === true) {
-    throw new Error(`partial aggregate evidence must not satisfy all targets: ${JSON.stringify(result)}`);
+  if (!result.blockers?.includes("coverage_still_increasing_retry_required")) {
+    throw new Error(`expected increasing coverage to require another retry, got ${JSON.stringify(result)}`);
   }
 
+  const plateau = [80, 85, 90, 90, 90];
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    writeFileSync(path.join(residualDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({
+      attempt,
+      afterCoverage: { line: plateau[attempt - 1], branch: plateau[attempt - 1] - 10, function: 90, mcdc: 40 }
+    }));
+  }
   writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
     "# Residual Summary",
     "",
@@ -113,6 +120,9 @@ try {
   const passedResult = runValidate();
   if (!passedResult) throw new Error("missing second validation result");
   if (passedResult.status !== "passed") throw new Error(`expected passed from fully classified discovered artifacts, got ${JSON.stringify(passedResult)}`);
+  if (passedResult.coveragePlateauSatisfied !== true || passedResult.residualCoverageProgress?.consecutiveNoIncrease < 2) {
+    throw new Error(`expected plateau evidence from discovered artifacts, got ${JSON.stringify(passedResult)}`);
+  }
   if (passedResult.attemptHistoryPath !== "discovered-residual-artifacts") {
     throw new Error(`expected discovered artifact evidence, got ${passedResult.attemptHistoryPath}`);
   }

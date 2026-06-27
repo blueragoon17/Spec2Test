@@ -80,17 +80,17 @@ function validate(maxAttempts, perFunctionAttempts, withEvidence = false, perFun
 }
 
 const belowPlanMax = validate(3, 2);
-if (belowPlanMax.status !== "blocked" || !belowPlanMax.blockers?.includes("residual_targets_without_max_attempt_or_stop_reason")) {
+if (belowPlanMax.status !== "blocked" || !belowPlanMax.blockers?.includes("coverage_growth_attempts_missing")) {
   throw new Error(`per-function attempts below plan max should block: ${JSON.stringify(belowPlanMax)}`);
 }
 
 const atPlanMaxNoEvidence = validate(3, 3);
-if (atPlanMaxNoEvidence.status !== "blocked" || !atPlanMaxNoEvidence.blockers?.includes("residual_targets_without_max_attempt_or_stop_reason")) {
+if (atPlanMaxNoEvidence.status !== "blocked" || !atPlanMaxNoEvidence.blockers?.includes("coverage_growth_attempts_missing")) {
   throw new Error(`per-function attempts at plan max without evidence should block: ${JSON.stringify(atPlanMaxNoEvidence)}`);
 }
 
 const stopReasonOnly = validate(3, 0, false, [{ function: "func1", stopReason: "crash-risk" }]);
-if (stopReasonOnly.status !== "blocked" || !stopReasonOnly.blockers?.includes("residual_targets_without_max_attempt_or_stop_reason")) {
+if (stopReasonOnly.status !== "blocked" || !stopReasonOnly.blockers?.includes("coverage_growth_attempts_missing")) {
   throw new Error(`per-function stopReason without artifact evidence should block: ${JSON.stringify(stopReasonOnly)}`);
 }
 
@@ -99,7 +99,7 @@ const stopReasonReportOnly = validate(3, 1, true, [{
   stopReason: "crash-risk",
   reportPath: "residual_attempt1_report.txt"
 }]);
-if (stopReasonReportOnly.status !== "blocked" || !stopReasonReportOnly.blockers?.includes("residual_targets_without_max_attempt_or_stop_reason")) {
+if (stopReasonReportOnly.status !== "blocked" || !stopReasonReportOnly.blockers?.includes("coverage_growth_attempts_missing")) {
   throw new Error(`per-function stopReason with report-only evidence should block: ${JSON.stringify(stopReasonReportOnly)}`);
 }
 
@@ -108,8 +108,8 @@ const stopReasonWithLog = validate(3, 1, true, [{
   stopReason: "crash-risk",
   logPath: "residual_attempt1.log"
 }]);
-if (stopReasonWithLog.status !== "passed") {
-  throw new Error(`per-function stopReason with diagnostic log evidence should pass: ${JSON.stringify(stopReasonWithLog)}`);
+if (stopReasonWithLog.status !== "blocked" || !stopReasonWithLog.blockers?.includes("coverage_growth_attempts_missing")) {
+  throw new Error(`per-function stopReason with diagnostic log evidence must still need coverage plateau: ${JSON.stringify(stopReasonWithLog)}`);
 }
 
 const legacyStopReasonWithEvidencePath = validate(3, 1, true, null, {
@@ -120,18 +120,36 @@ const legacyStopReasonWithEvidencePath = validate(3, 1, true, null, {
     stopReason: "crash-risk"
   }]
 });
-if (legacyStopReasonWithEvidencePath.status !== "passed") {
-  throw new Error(`legacy perFunctionStopReasons evidencePath should be preserved: ${JSON.stringify(legacyStopReasonWithEvidencePath)}`);
+if (legacyStopReasonWithEvidencePath.status !== "blocked" || !legacyStopReasonWithEvidencePath.blockers?.includes("coverage_growth_attempts_missing")) {
+  throw new Error(`legacy perFunctionStopReasons evidencePath alone should not bypass plateau: ${JSON.stringify(legacyStopReasonWithEvidencePath)}`);
 }
 
 const goalReachedOnly = validate(3, 0, false, [{ function: "func1", goalReached: true }]);
-if (goalReachedOnly.status !== "blocked" || !goalReachedOnly.blockers?.includes("residual_targets_without_max_attempt_or_stop_reason")) {
+if (goalReachedOnly.status !== "blocked" || !goalReachedOnly.blockers?.includes("coverage_growth_attempts_missing")) {
   throw new Error(`per-function goalReached without artifact evidence should block: ${JSON.stringify(goalReachedOnly)}`);
 }
 
 const atPlanMax = validate(3, 3, true);
-if (atPlanMax.status !== "passed") {
-  throw new Error(`per-function attempts at plan max should pass: ${JSON.stringify(atPlanMax)}`);
+if (atPlanMax.status !== "blocked" || !atPlanMax.blockers?.includes("coverage_growth_attempts_missing")) {
+  throw new Error(`per-function attempts at plan max without aggregate coverage plateau should block: ${JSON.stringify(atPlanMax)}`);
+}
+
+const plateauAggregate = validate(3, 4, true, null, {
+  schemaVersion: "perfectone.coding-agent-residual-attempt-history.v1",
+  aggregateAttempts: [
+    { attempt: 1, changedArtifact: "residual_attempt1.c", reportPath: "residual_attempt1_report.txt", afterCoverage: { line: 80, branch: 70, function: 90, mcdc: 40 } },
+    { attempt: 2, changedArtifact: "residual_attempt2.c", reportPath: "residual_attempt2_report.txt", afterCoverage: { line: 85, branch: 75, function: 90, mcdc: 40 } },
+    { attempt: 3, changedArtifact: "residual_attempt3.c", reportPath: "residual_attempt3_report.txt", afterCoverage: { line: 85, branch: 75, function: 90, mcdc: 40 } },
+    { attempt: 4, changedArtifact: "residual_attempt4.c", reportPath: "residual_attempt4_report.txt", afterCoverage: { line: 85, branch: 75, function: 90, mcdc: 40 } }
+  ],
+  perFunctionStopReasons: [{
+    function: "func1",
+    evidencePath: "residual_attempt1.log",
+    stopReason: "max-coverage"
+  }]
+});
+if (plateauAggregate.status !== "passed" || plateauAggregate.coveragePlateauSatisfied !== true) {
+  throw new Error(`aggregate two-attempt plateau should pass final gate: ${JSON.stringify(plateauAggregate)}`);
 }
 
 console.log(JSON.stringify({
@@ -143,5 +161,6 @@ console.log(JSON.stringify({
   stopReasonWithLogGateStatus: stopReasonWithLog.status,
   legacyStopReasonWithEvidencePathGateStatus: legacyStopReasonWithEvidencePath.status,
   goalReachedOnlyGateStatus: goalReachedOnly.status,
-  atPlanMaxGateStatus: atPlanMax.status
+  atPlanMaxGateStatus: atPlanMax.status,
+  plateauAggregateGateStatus: plateauAggregate.status
 }, null, 2));

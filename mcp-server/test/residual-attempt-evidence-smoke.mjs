@@ -6,6 +6,11 @@ import { spawnSync } from "node:child_process";
 
 const root = path.resolve(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
+function plateauCoverageForAttempt(attempt) {
+  const pct = attempt <= 3 ? 80 + attempt : 83;
+  return { line: pct, branch: pct - 10, function: 90, mcdc: 40 };
+}
+
 function validateCase({ attempts, writeSupportArtifact, emptySupportArtifact = false, reportOnly = false, maxAttempts = 5 }) {
   const outDir = mkdtempSync(path.join(os.tmpdir(), "perfectone-attempt-evidence-"));
   const reportDir = path.join(outDir, "mcp_reports");
@@ -35,7 +40,10 @@ function validateCase({ attempts, writeSupportArtifact, emptySupportArtifact = f
     }, null, 2));
 
     for (const attempt of attempts) {
-      writeFileSync(path.join(residualDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({ attempt }));
+      writeFileSync(path.join(residualDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({
+        attempt,
+        afterCoverage: plateauCoverageForAttempt(attempt)
+      }));
       if (writeSupportArtifact) {
         const artifactName = reportOnly ? `residual_attempt${attempt}_report.txt` : `residual_attempt${attempt}.c`;
         writeFileSync(path.join(residualDir, artifactName), emptySupportArtifact ? "" : `attempt ${attempt}\n`);
@@ -105,7 +113,7 @@ function validateStructuredHistoryCase() {
       const reportPath = `residual_attempt${attempt}_report.txt`;
       writeFileSync(path.join(residualDir, changedArtifact), `/* attempt ${attempt} */\n`);
       writeFileSync(path.join(residualDir, reportPath), `attempt ${attempt} coverage report\n`);
-      residualAttempts.push({ attempt, changedArtifact, reportPath });
+      residualAttempts.push({ attempt, changedArtifact, reportPath, afterCoverage: plateauCoverageForAttempt(attempt) });
     }
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({ residualAttempts }, null, 2));
     writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
@@ -173,7 +181,7 @@ function validateDuplicateAttemptHistoryCase() {
       const reportPath = `residual_attempt${attempt}_report.txt`;
       writeFileSync(path.join(residualDir, changedArtifact), `/* attempt ${attempt} */\n`);
       writeFileSync(path.join(residualDir, reportPath), `attempt ${attempt} coverage report\n`);
-      residualAttempts.push({ attempt, changedArtifact, reportPath });
+      residualAttempts.push({ attempt, changedArtifact, reportPath, afterCoverage: plateauCoverageForAttempt(attempt) });
     }
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({ residualAttempts }, null, 2));
     writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
@@ -242,7 +250,10 @@ function validatePartialHistoryWithDiscoveredArtifactsCase() {
       const targetDir = attempt === 5 ? path.join(residualDir, "nested") : residualDir;
       mkdirSync(targetDir, { recursive: true });
       writeFileSync(path.join(targetDir, `residual_attempt${attempt}.c`), `/* discovered attempt ${attempt} */\n`);
-      writeFileSync(path.join(targetDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({ attempt }));
+      writeFileSync(path.join(targetDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({
+        attempt,
+        afterCoverage: plateauCoverageForAttempt(attempt)
+      }));
     }
     writeFileSync(path.join(residualDir, "residual_attempt1_report.txt"), "attempt 1 coverage report\n");
     writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
@@ -372,7 +383,7 @@ function validatePlainSourceOnlyCase() {
       const reportPath = `residual_attempt${attempt}_report.txt`;
       writeFileSync(path.join(residualDir, changedArtifact), `/* plain source ${attempt} */\n`);
       writeFileSync(path.join(residualDir, reportPath), `attempt ${attempt} coverage report\n`);
-      residualAttempts.push({ attempt, changedArtifact, reportPath });
+      residualAttempts.push({ attempt, changedArtifact, reportPath, afterCoverage: plateauCoverageForAttempt(attempt) });
     }
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({ residualAttempts }, null, 2));
     writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
@@ -437,7 +448,10 @@ function validateStructuredCoverageLogOnlyCase() {
       const coverageLog = `attempt${attempt}_coverage_aggregate.log`;
       const measurement = `residual_attempt${attempt}_llvm.json`;
       writeFileSync(path.join(residualDir, coverageLog), `attempt ${attempt} aggregate log\n`);
-      writeFileSync(path.join(residualDir, measurement), JSON.stringify({ attempt }));
+      writeFileSync(path.join(residualDir, measurement), JSON.stringify({
+        attempt,
+        afterCoverage: plateauCoverageForAttempt(attempt)
+      }));
       residualAttempts.push({ attempt, logPath: coverageLog, coverageArtifact: measurement });
     }
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({ residualAttempts }, null, 2));
@@ -512,7 +526,7 @@ function validateSymlinkEscapeCase() {
       const reportPath = `residual_attempt${attempt}_report.txt`;
       if (attempt > 1) writeFileSync(path.join(residualDir, changedArtifact), `/* attempt ${attempt} */\n`);
       writeFileSync(path.join(residualDir, reportPath), `attempt ${attempt} coverage report\n`);
-      residualAttempts.push({ attempt, changedArtifact, reportPath });
+      residualAttempts.push({ attempt, changedArtifact, reportPath, afterCoverage: plateauCoverageForAttempt(attempt) });
     }
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({ residualAttempts }, null, 2));
     writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
@@ -547,67 +561,67 @@ function validateSymlinkEscapeCase() {
 }
 
 const sparse = validateCase({ attempts: [1, 2, 3, 4, 99], writeSupportArtifact: true });
-if (sparse.status !== "blocked" || !sparse.blockers?.includes("aggregate_residual_attempt_sequence_incomplete")) {
+if (sparse.status !== "blocked" || !sparse.blockers?.includes("residual_repair_attempt_sequence_incomplete")) {
   throw new Error(`sparse attempt sequence should block: ${JSON.stringify(sparse)}`);
 }
 
 const measurementOnly = validateCase({ attempts: [1, 2, 3, 4, 5], writeSupportArtifact: false });
-if (measurementOnly.status !== "blocked" || !measurementOnly.blockers?.includes("aggregate_residual_attempt_evidence_incomplete")) {
+if (measurementOnly.status !== "blocked" || !measurementOnly.blockers?.includes("residual_repair_attempts_without_measured_generated_artifact_changes")) {
   throw new Error(`measurement-only attempts should block: ${JSON.stringify(measurementOnly)}`);
 }
 
 const reportOnly = validateCase({ attempts: [1, 2, 3, 4, 5], writeSupportArtifact: true, reportOnly: true });
-if (reportOnly.status !== "blocked" || !reportOnly.blockers?.includes("aggregate_residual_attempt_evidence_incomplete")) {
+if (reportOnly.status !== "blocked" || !reportOnly.blockers?.includes("residual_repair_attempts_without_measured_generated_artifact_changes")) {
   throw new Error(`report-only attempts should not count as generated residual attempts: ${JSON.stringify(reportOnly)}`);
 }
 
 const structuredReportLogOnly = validateStructuredReportLogOnlyCase();
-if (structuredReportLogOnly.status !== "blocked" || !structuredReportLogOnly.blockers?.includes("aggregate_residual_attempt_evidence_incomplete")) {
+if (structuredReportLogOnly.status !== "blocked" || !structuredReportLogOnly.blockers?.includes("residual_repair_attempts_without_measured_generated_artifact_changes")) {
   throw new Error(`report files masquerading as logPath should not count as generated residual attempts: ${JSON.stringify(structuredReportLogOnly)}`);
 }
 
 const plainSourceOnly = validatePlainSourceOnlyCase();
-if (plainSourceOnly.status !== "blocked" || !plainSourceOnly.blockers?.includes("aggregate_residual_attempt_evidence_incomplete")) {
+if (plainSourceOnly.status !== "blocked" || !plainSourceOnly.blockers?.includes("residual_repair_attempts_without_measured_generated_artifact_changes")) {
   throw new Error(`plain source filenames should not count as generated residual attempts: ${JSON.stringify(plainSourceOnly)}`);
 }
 
 const structuredCoverageLogOnly = validateStructuredCoverageLogOnlyCase();
-if (structuredCoverageLogOnly.status !== "blocked" || !structuredCoverageLogOnly.blockers?.includes("aggregate_residual_attempt_evidence_incomplete")) {
+if (structuredCoverageLogOnly.status !== "blocked" || !structuredCoverageLogOnly.blockers?.includes("residual_repair_attempts_without_measured_generated_artifact_changes")) {
   throw new Error(`coverage aggregate logs should not count as generated residual attempts: ${JSON.stringify(structuredCoverageLogOnly)}`);
 }
 
 const emptySupportArtifacts = validateCase({ attempts: [1, 2, 3, 4, 5], writeSupportArtifact: true, emptySupportArtifact: true });
-if (emptySupportArtifacts.status !== "blocked" || !emptySupportArtifacts.blockers?.includes("aggregate_residual_attempt_evidence_incomplete")) {
+if (emptySupportArtifacts.status !== "blocked" || !emptySupportArtifacts.blockers?.includes("residual_repair_attempts_without_measured_generated_artifact_changes")) {
   throw new Error(`zero-byte support artifacts should block: ${JSON.stringify(emptySupportArtifacts)}`);
 }
 
 const complete = validateCase({ attempts: [1, 2, 3, 4, 5], writeSupportArtifact: true });
-if (complete.status !== "passed" || complete.aggregateEvidenceSatisfied !== true) {
+if (complete.status !== "passed" || complete.coveragePlateauSatisfied !== true) {
   throw new Error(`complete aggregate attempt evidence should pass: ${JSON.stringify(complete)}`);
 }
 
 const maxZero = validateCase({ attempts: [], writeSupportArtifact: false, maxAttempts: 0 });
-if (maxZero.status !== "blocked" || !maxZero.blockers?.includes("aggregate_residual_attempts_below_required")) {
+if (maxZero.status !== "blocked" || !maxZero.blockers?.includes("coverage_growth_attempts_missing")) {
   throw new Error(`maxAttemptsPerFunction=0 must be normalized and block without attempts: ${JSON.stringify(maxZero)}`);
 }
 
 const structuredHistory = validateStructuredHistoryCase();
-if (structuredHistory.status !== "passed" || structuredHistory.aggregateEvidenceSatisfied !== true) {
+if (structuredHistory.status !== "passed" || structuredHistory.coveragePlateauSatisfied !== true) {
   throw new Error(`structured aggregate attempt evidence should pass: ${JSON.stringify(structuredHistory)}`);
 }
 
 const duplicateAttemptHistory = validateDuplicateAttemptHistoryCase();
-if (duplicateAttemptHistory.status !== "passed" || duplicateAttemptHistory.aggregateEvidenceSatisfied !== true) {
+if (duplicateAttemptHistory.status !== "passed" || duplicateAttemptHistory.coveragePlateauSatisfied !== true) {
   throw new Error(`duplicate attempt records should pass when one record for each attempt has complete evidence: ${JSON.stringify(duplicateAttemptHistory)}`);
 }
 
 const partialHistoryWithDiscoveredArtifacts = validatePartialHistoryWithDiscoveredArtifactsCase();
-if (partialHistoryWithDiscoveredArtifacts.status !== "passed" || partialHistoryWithDiscoveredArtifacts.aggregateEvidenceSatisfied !== true) {
+if (partialHistoryWithDiscoveredArtifacts.status !== "passed" || partialHistoryWithDiscoveredArtifacts.coveragePlateauSatisfied !== true) {
   throw new Error(`partial JSON history should be merged with discovered artifact evidence: ${JSON.stringify(partialHistoryWithDiscoveredArtifacts)}`);
 }
 
 const symlinkEscape = validateSymlinkEscapeCase();
-if (!symlinkEscape.skipped && (symlinkEscape.status !== "blocked" || !symlinkEscape.blockers?.includes("aggregate_residual_attempt_evidence_incomplete"))) {
+if (!symlinkEscape.skipped && (symlinkEscape.status !== "blocked" || !symlinkEscape.blockers?.includes("residual_repair_attempt_sequence_incomplete"))) {
   throw new Error(`symlinked artifact escaping outDir should not count as residual evidence: ${JSON.stringify(symlinkEscape)}`);
 }
 

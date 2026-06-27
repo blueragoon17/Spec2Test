@@ -135,7 +135,7 @@ try {
   const summaryOnlyResult = lines.find((line) => line.id === 2)?.result?.structuredContent;
   if (!summaryOnlyResult) throw new Error("missing summary-only validation result");
   if (summaryOnlyResult.status !== "blocked") throw new Error(`summary-only residual classification must block, got ${JSON.stringify(summaryOnlyResult)}`);
-  if (!summaryOnlyResult.blockers?.includes("aggregate_residual_attempts_below_required")) {
+  if (!summaryOnlyResult.blockers?.includes("coverage_growth_attempts_missing")) {
     throw new Error(`missing aggregate retry blocker for summary-only classification: ${JSON.stringify(summaryOnlyResult)}`);
   }
   console.log(JSON.stringify({
@@ -176,7 +176,11 @@ try {
   }, null, 2));
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     writeFileSync(path.join(aliasTargetsResidualDir, `residual_attempt${attempt}.c`), `/* generated attempt ${attempt} */\n`);
-    writeFileSync(path.join(aliasTargetsResidualDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({ attempt }));
+    const pct = attempt <= 3 ? 80 + attempt : 83;
+    writeFileSync(path.join(aliasTargetsResidualDir, `residual_attempt${attempt}_llvm.json`), JSON.stringify({
+      attempt,
+      afterCoverage: { line: pct, branch: pct - 10, function: 90, mcdc: 40 }
+    }));
   }
   writeFileSync(path.join(aliasTargetsReportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
     "- `func1`: crash-risk. Classified after aggregate attempts.",
@@ -205,7 +209,7 @@ try {
   const lines = completed.stdout.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
   const aliasTargetsResult = lines.find((line) => line.id === 2)?.result?.structuredContent;
   if (!aliasTargetsResult) throw new Error("missing alias-target validation result");
-  if (aliasTargetsResult.status !== "passed" || aliasTargetsResult.aggregateEvidenceSatisfied !== true) {
+  if (aliasTargetsResult.status !== "passed" || aliasTargetsResult.coveragePlateauSatisfied !== true) {
     throw new Error(`string/targetFunction targets should be recognized and satisfied: ${JSON.stringify(aliasTargetsResult)}`);
   }
   console.log(JSON.stringify({

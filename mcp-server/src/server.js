@@ -3095,7 +3095,7 @@ function sourceTargetsMissingFromFunctionReports(targetFunctionFilter, functionR
 }
 
 const C_RESIDUAL_MAX_ATTEMPTS = 5;
-const C_RESIDUAL_NO_IMPROVEMENT_LIMIT = 1;
+const C_RESIDUAL_NO_IMPROVEMENT_LIMIT = 2;
 const C_STRUCT_DEPTH_SECURITY_MAX = 5;
 const C_COVERAGE_GOAL_PERCENT = 100;
 const CODING_AGENT_CODE_AUGMENTATION_METHODS = [
@@ -3491,10 +3491,10 @@ function codingAgentResidualLoopForFunction(item) {
       mode: "per-function-coverage-growth-loop",
       maxAttempts: C_RESIDUAL_MAX_ATTEMPTS,
       noImprovementLimit: C_RESIDUAL_NO_IMPROVEMENT_LIMIT,
-      continuationRule: "if a coding-agent residual attempt increases any requested coverage metric and the 100% goal is still unmet, the next attempt is mandatory until maxAttempts is reached or a later attempt has no coverage increase",
+      continuationRule: "if a coding-agent residual attempt increases coverage and the 100% goal is still unmet, the next attempt is mandatory; a max-attempt count alone is never a stop condition",
       attemptHistory: [],
       bestCoverage: details.coverage || null,
-      stopRule: `run Coding Agent residual repair up to ${C_RESIDUAL_MAX_ATTEMPTS} attempts. Each attempt must directly edit generated verification artifacts, then replay and remeasure coverage. A coverage-increasing attempt cannot be the last attempt unless the 100% goal is reached. Stop before attempt ${C_RESIDUAL_MAX_ATTEMPTS} only when the 100% goal is reached, or when a coding-agent attempt shows no coverage increase and the remaining gap is classified with evidence as max-coverage, infeasible, crash-risk, or toolchain-blocked`,
+      stopRule: `retry Coding Agent residual repair until the 100% goal is reached, or until ${C_RESIDUAL_NO_IMPROVEMENT_LIMIT} consecutive measured generated-artifact attempts show no coverage increase. Each attempt must directly edit generated verification artifacts, then replay and remeasure coverage`,
       stopReason: null
     }
   };
@@ -3554,7 +3554,7 @@ function buildCodingAgentResidualRepairPlan({ residualTargets, targetFunctionFil
     },
     targets,
     instructions: targets.length > 0 ? [
-      `Run Coding Agent residual repair toward the 100% coverage goal for up to ${C_RESIDUAL_MAX_ATTEMPTS} attempts.`,
+      `Run Coding Agent residual repair toward the 100% coverage goal until coverage reaches 100% or ${C_RESIDUAL_NO_IMPROVEMENT_LIMIT} consecutive generated-artifact attempts show no coverage increase.`,
       "Use Windows local LLVM 21+ with lld-link as the first residual MC/DC measurement path when available: clang -O0 -g -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc -fuse-ld=lld -Wl,/INCREMENTAL:NO <generated_harness.c> -o <test.exe>.",
       "Run independent residual compile/replay/coverage jobs in parallel when their generated artifacts and profile output paths are disjoint.",
       "If Windows local LLVM/lld-link is missing, ask the user before installing LLVM; do not silently install it.",
@@ -3563,7 +3563,7 @@ function buildCodingAgentResidualRepairPlan({ residualTargets, targetFunctionFil
       "Do not count Docker/local KLEE reruns, PerfectOne reruns, report regeneration, or global coverage reruns as coding-agent residual attempts.",
       "Each coding-agent residual attempt must name the target function, uncovered line/branch/MC/DC gap, changed generated artifact, replay command, before coverage, after coverage, best coverage, and stop reason.",
       "If an attempt increases coverage and the 100% goal is still unmet, immediately run the next coding-agent residual attempt.",
-      `Do not stop before attempt ${C_RESIDUAL_MAX_ATTEMPTS} unless the 100% goal is reached, or a coding-agent attempt shows no increase and the remaining gap has max-coverage/infeasible/crash-risk/toolchain-blocked evidence.`
+      `Do not stop on max-attempt count alone. Stop below 100% only after ${C_RESIDUAL_NO_IMPROVEMENT_LIMIT} consecutive measured generated-artifact attempts show no coverage increase.`
     ] : []
   };
 }
@@ -3579,14 +3579,14 @@ function buildCodingAgentResidualRepairPrompt(plan) {
   return [
     "Coding Agent residual repair is required now.",
     `Targets: ${targetSummary || "unknown"}.`,
-    `For each target function, run up to ${plan.attemptAccounting.maxAttemptsPerFunction} coding-agent attempts.`,
+    `For each target function, keep running coding-agent attempts until 100% coverage or ${C_RESIDUAL_NO_IMPROVEMENT_LIMIT} consecutive no-increase attempts.`,
     `Preferred residual MC/DC path: ${plan.executionStrategy?.first || "local coverage"}.`,
     "A coding-agent attempt is a direct generated harness/fixture/stub/testcase-input edit followed by Windows local LLVM/lld-link compile, replay, and coverage remeasurement when available.",
     "Run independent residual jobs in parallel if their generated artifacts and profile output paths are disjoint.",
     "The coding agent must directly modify generated verification artifacts to raise coverage; do not modify the user source file.",
     "Docker/local KLEE reruns and PerfectOne reruns do not count as coding-agent residual attempts.",
     "If a residual attempt increases coverage but the 100% goal is still unmet, the next attempt is mandatory.",
-    `Do not stop before attempt ${plan.attemptAccounting.maxAttemptsPerFunction} unless coverage reaches the 100% goal, or one coding-agent attempt shows no increase and the remaining gap has max-coverage/infeasible/crash-risk/toolchain-blocked evidence.`,
+    `Do not stop below 100% unless ${C_RESIDUAL_NO_IMPROVEMENT_LIMIT} consecutive measured generated-artifact attempts show no coverage increase.`,
     "The final report must include attempt history per function with before/after/best coverage and stop reason."
   ].join(" ");
 }
@@ -3612,6 +3612,7 @@ function buildCodingAgentResidualActionRequired(plan, coverageExecution) {
     baseline: plan.baseline || null,
     targetCount,
     maxAttemptsPerFunction: plan.attemptAccounting?.maxAttemptsPerFunction ?? C_RESIDUAL_MAX_ATTEMPTS,
+    stopAfterConsecutiveNoIncrease: C_RESIDUAL_NO_IMPROVEMENT_LIMIT,
     attemptDefinition: plan.attemptAccounting?.codingAgentAttemptDefinition || "generated artifact edit plus replay and coverage remeasurement",
     prohibitedShortcuts: [
       "Do not stop with a summary of needs_coding_agent_residual.",
@@ -3636,7 +3637,7 @@ function buildCodingAgentResidualActionRequired(plan, coverageExecution) {
     executionStrategy: plan.executionStrategy || null,
     message: [
       `Coding-agent residual repair is mandatory before the final answer. ${targetCount} source-target functions remain below goal.`,
-      `Run up to ${plan.attemptAccounting?.maxAttemptsPerFunction ?? C_RESIDUAL_MAX_ATTEMPTS} generated-artifact edit/replay/remeasure attempts per function.`,
+      `Run generated-artifact edit/replay/remeasure attempts until 100% coverage, or until ${C_RESIDUAL_NO_IMPROVEMENT_LIMIT} consecutive measured attempts show no coverage increase.`,
       "If a residual attempt increases coverage but the 100% goal is still unmet, continue with the next attempt instead of producing a final answer.",
       "After residual repair, update the final HTML/report so Coding Agent Applied Cumulative coverage is numeric and Coding Agent Increase is +N%, not +pending."
     ].join(" ")
@@ -3724,8 +3725,8 @@ function buildCUnitVerificationFlow({ report, targetFunctionFilter, functionRepo
         targetSelection: "all source-target functions whose function, line, branch, or MC/DC coverage is below the 100% goal after PerfectOne filtered KLEE/MC/DC baseline; do not limit residual work to functions missing from runner discovery",
         attemptUnit: "one coding-agent-generated harness, fixture, stub, or testcase-input change followed by Windows local LLVM/lld-link MC/DC replay when available; Docker/local KLEE reruns do not count as coding-agent residual attempts",
         mustDirectlyModifyGeneratedArtifacts: true,
-        continuationRule: "a coverage-increasing coding-agent attempt is never sufficient by itself when the 100% goal remains unmet; continue to the next attempt",
-        stopRule: `run Coding Agent residual repair up to ${C_RESIDUAL_MAX_ATTEMPTS} attempts. Stop before attempt ${C_RESIDUAL_MAX_ATTEMPTS} only if the 100% goal is reached, or if one coding-agent attempt shows no coverage increase and the remaining gap is classified with evidence as max-coverage, infeasible, crash-risk, or toolchain-blocked. Docker/local KLEE reruns are not coding-agent residual attempts`
+        continuationRule: "a coverage-increasing coding-agent attempt is never sufficient by itself when the 100% goal remains unmet; continue to the next generated-artifact attempt",
+        stopRule: `retry Coding Agent residual repair until the 100% goal is reached, or until ${C_RESIDUAL_NO_IMPROVEMENT_LIMIT} consecutive measured generated-artifact attempts show no coverage increase. Docker/local KLEE reruns are not coding-agent residual attempts`
       },
       perFunction: residualFunctions.map(codingAgentResidualLoopForFunction)
     },
@@ -3818,7 +3819,7 @@ function renderMarkdownReport(report, diagnosticSummary) {
       `- residual first measurement path: ${cFlow.codingAgentResidual?.iterationPolicy?.firstMeasurementPath || "unknown"}`,
       `- residual parallel execution: ${boolText(cFlow.codingAgentResidual?.iterationPolicy?.parallelExecution)}`,
       `- residual max attempts: ${cFlow.codingAgentResidual?.iterationPolicy?.maxAttempts ?? "unknown"}`,
-      `- residual early-stop evidence threshold: ${cFlow.codingAgentResidual?.iterationPolicy?.noImprovementLimit ?? "unknown"} no-improvement coding-agent attempts plus max-coverage/infeasible evidence`,
+      `- residual early-stop evidence threshold: ${cFlow.codingAgentResidual?.iterationPolicy?.noImprovementLimit ?? "unknown"} consecutive no-improvement coding-agent attempts`,
       `- residual target count: ${cFlow.codingAgentResidual?.residualTargetCount ?? (cFlow.codingAgentResidual?.perFunction || []).length}`,
       `- coding-agent test augmentation required: ${boolText(cFlow.codingAgentTestAugmentation?.executionRequired)}`,
       `- code-only augmentation methods: ${((cFlow.codingAgentTestAugmentation?.codeOnlyDefault?.methods || []).map((item) => `${item.designMethod}:${item.status || item.required}`).join(", ") || "unknown")}`,
@@ -3994,7 +3995,7 @@ function renderHtmlReport(report, diagnosticSummary) {
       <td>${htmlEscape(item.reason || "coverage_below_goal")}</td>
       <td>${htmlEscape((item.unmetMetrics || []).join(", ") || "coverage_below_goal")}</td>
       <td>${htmlEscape(item.maxAttempts ?? C_RESIDUAL_MAX_ATTEMPTS)}</td>
-      <td>${htmlEscape(item.earlyStopNoImprovementAttempts ?? C_RESIDUAL_NO_IMPROVEMENT_LIMIT)} no-increase coding-agent attempts plus max-coverage/infeasible evidence</td>
+      <td>${htmlEscape(item.earlyStopNoImprovementAttempts ?? C_RESIDUAL_NO_IMPROVEMENT_LIMIT)} consecutive no-increase coding-agent attempts</td>
       <td><code>${htmlEscape(item.evidenceSource || "unknown")}</code></td>
     </tr>`)
     .join("\n");
@@ -4097,7 +4098,7 @@ function renderHtmlReport(report, diagnosticSummary) {
     <tr><th>Parallel execution</th><td>${htmlEscape(boolText(cFlow.codingAgentResidual?.iterationPolicy?.parallelExecution))}</td></tr>
     <tr><th>Fallback order</th><td>${htmlEscape((cFlow.codingAgentResidual?.iterationPolicy?.fallbackOrder || []).join(" -> ") || "unknown")}</td></tr>
     <tr><th>Max attempts</th><td>${htmlEscape(cFlow.codingAgentResidual?.iterationPolicy?.maxAttempts ?? "unknown")} coding-agent residual attempts per function</td></tr>
-    <tr><th>Early-stop evidence threshold</th><td>${htmlEscape(cFlow.codingAgentResidual?.iterationPolicy?.noImprovementLimit ?? "unknown")} no-improvement coding-agent attempts plus max-coverage/infeasible/crash-risk/toolchain-blocked evidence. This is not the primary retry count.</td></tr>
+    <tr><th>Early-stop evidence threshold</th><td>${htmlEscape(cFlow.codingAgentResidual?.iterationPolicy?.noImprovementLimit ?? "unknown")} consecutive no-improvement coding-agent attempts. Max-attempt count alone is not a stop condition.</td></tr>
     <tr><th>Target selection</th><td>${htmlEscape(cFlow.codingAgentResidual?.iterationPolicy?.targetSelection || "unknown")}</td></tr>
     <tr><th>Stop rule</th><td>${htmlEscape(cFlow.codingAgentResidual?.iterationPolicy?.stopRule || "unknown")}</td></tr>
     <tr><th>Per-function loop entries</th><td>${htmlEscape((cFlow.codingAgentResidual?.perFunction || []).length)}</td></tr>
@@ -4321,6 +4322,11 @@ function discoverResidualEvidenceFromArtifacts(outDir) {
       current.artifacts.push(fullPath);
       if (/\.c$/i.test(entry.name) && !current.changedArtifact) current.changedArtifact = fullPath;
       if (/\.exe$/i.test(entry.name) && !current.replayCommand) current.replayCommand = fullPath;
+      if (/_llvm\.json$/i.test(entry.name) || /coverage.*\.json$/i.test(entry.name)) {
+        const parsed = readJsonWithFallbackSync(fullPath, null);
+        const parsedCoverage = parsed?.afterCoverage || parsed?.coverage || parsed?.finalCoverage || parsed?.summary || null;
+        if (parsedCoverage && typeof parsedCoverage === "object" && !current.afterCoverage) current.afterCoverage = parsedCoverage;
+      }
       attemptsByNumber.set(attempt, current);
     }
   }
@@ -4455,28 +4461,32 @@ function loadResidualAttemptHistory(outDir, report) {
   return { attempts: [], perFunction: [], finalCoverage: null, remainingGaps: [], path: null, source: null, discovered };
 }
 
+function coverageMetricPercent(metric, allowZeroTotal = false) {
+  if (typeof metric === "number") return metric;
+  if (typeof metric === "string") {
+    const parsed = Number(metric.replace(/%$/, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (!metric || typeof metric !== "object") return null;
+  const direct = metric.pct ?? metric.percent ?? metric.percentage;
+  if (typeof direct === "number") return direct;
+  if (typeof direct === "string") {
+    const parsed = Number(direct.replace(/%$/, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const covered = metric.covered ?? metric.hit ?? metric.hits ?? metric.executed ?? metric.taken;
+  const total = metric.total ?? metric.count;
+  if (typeof covered === "number" && typeof total === "number") {
+    if (total > 0 && covered >= 0 && covered <= total) return (covered / total) * 100;
+    if (allowZeroTotal && total === 0 && (covered === undefined || covered === 0)) return 100;
+  }
+  return null;
+}
+
 function coverageGoalReached(finalCoverage) {
   if (!finalCoverage || typeof finalCoverage !== "object") return false;
-  const metricPercent = (metric) => {
-    if (typeof metric === "number") return metric;
-    if (typeof metric === "string") {
-      const parsed = Number(metric.replace(/%$/, ""));
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    if (!metric || typeof metric !== "object") return null;
-    const direct = metric.pct ?? metric.percent ?? metric.percentage;
-    if (typeof direct === "number") return direct;
-    if (typeof direct === "string") {
-      const parsed = Number(direct.replace(/%$/, ""));
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    const covered = metric.covered ?? metric.hit ?? metric.hits ?? metric.executed ?? metric.taken;
-    const total = metric.total ?? metric.count;
-    if (typeof covered === "number" && typeof total === "number" && total > 0 && covered >= 0 && covered <= total) return (covered / total) * 100;
-    return null;
-  };
   const metricReached = (metric, allowZeroTotal = false) => {
-    const pct = metricPercent(metric);
+    const pct = coverageMetricPercent(metric, allowZeroTotal);
     if (typeof pct === "number") return pct >= C_COVERAGE_GOAL_PERCENT;
     const total = metric?.total ?? metric?.count;
     const covered = metric?.covered ?? metric?.hit ?? metric?.hits ?? metric?.executed ?? metric?.taken;
@@ -4497,6 +4507,184 @@ function coverageGoalReached(finalCoverage) {
     && branchReached
     && metricReached(functionMetric, false)
     && metricReached(mcdcMetric, true);
+}
+
+function coverageMetricSummary(finalCoverage) {
+  if (!finalCoverage || typeof finalCoverage !== "object") return {};
+  const branch = finalCoverage.branch ?? finalCoverage.branches;
+  const branchExecuted = finalCoverage.branchExecuted;
+  const branchTaken = finalCoverage.branchTaken;
+  const branchPercent = branch !== undefined && branch !== null
+    ? coverageMetricPercent(branch, true)
+    : [coverageMetricPercent(branchExecuted, true), coverageMetricPercent(branchTaken, true)]
+      .filter((value) => typeof value === "number")
+      .reduce((sum, value, _index, values) => sum + (value / values.length), null);
+  return {
+    line: coverageMetricPercent(finalCoverage.line ?? finalCoverage.lines, false),
+    branch: branchPercent,
+    function: coverageMetricPercent(finalCoverage.function ?? finalCoverage.functions, false),
+    mcdc: coverageMetricPercent(finalCoverage.mcdc ?? finalCoverage.mcDc ?? finalCoverage.mc_dc, true)
+  };
+}
+
+function coverageImprovementScore(finalCoverage) {
+  const metrics = Object.values(coverageMetricSummary(finalCoverage)).filter((value) => typeof value === "number" && Number.isFinite(value));
+  if (metrics.length === 0) return null;
+  return metrics.reduce((sum, value) => sum + value, 0) / metrics.length;
+}
+
+function attemptCoverageObject(attempt) {
+  if (!attempt || typeof attempt !== "object") return null;
+  return attempt.afterCoverage
+    || attempt.coverage
+    || attempt.finalCoverage
+    || attempt.cumulativeCoverage
+    || attempt.bestCoverage
+    || attempt.measuredCoverage
+    || null;
+}
+
+function stringHashEvidence(attempt) {
+  if (!attempt || typeof attempt !== "object") return null;
+  for (const key of [
+    "changedArtifactHash",
+    "changedArtifactSha256",
+    "generatedArtifactHash",
+    "generatedArtifactSha256",
+    "artifactHash",
+    "artifactSha256",
+    "sourceHash",
+    "snapshotHash",
+    "snapshotSha256"
+  ]) {
+    if (typeof attempt[key] === "string" && attempt[key].trim()) return `${key}:${attempt[key].trim()}`;
+  }
+  return null;
+}
+
+function repairChangeArtifactCandidates(attempt) {
+  if (!attempt || typeof attempt !== "object") return [];
+  return [
+    attempt.changedArtifact,
+    attempt.generatedArtifact,
+    attempt.generatedArtifactSnapshot,
+    attempt.harnessPath,
+    attempt.fixturePath,
+    attempt.testcasePath,
+    attempt.inputPath,
+    ...(Array.isArray(attempt.changedArtifacts) ? attempt.changedArtifacts : []),
+    ...(Array.isArray(attempt.generatedArtifacts) ? attempt.generatedArtifacts : []),
+    ...(Array.isArray(attempt.artifacts) ? attempt.artifacts : [])
+  ].filter((value) => typeof value === "string");
+}
+
+function repairChangeArtifactKey(attempt, outDir = null) {
+  const hashEvidence = stringHashEvidence(attempt);
+  for (const candidate of repairChangeArtifactCandidates(attempt)) {
+    const name = path.basename(candidate).toLowerCase();
+    const generatedAction = /(?:residual|attempt|harness|fixture|testcase|input|seed)/i.test(name);
+    const nonRepair = /(?:report|coverage|aggregate|summary|_llvm|profraw|profdata|\.info$|\.exe$|\.log$|asan|ubsan|crash|diagnostic)/i.test(name);
+    const plausibleExtension = /\.(?:c|cc|cpp|h|hpp|json|csv|txt|ktest)$/i.test(name);
+    if (!generatedAction || nonRepair || !plausibleExtension) continue;
+    const existingPath = evidencePathCandidates(candidate, outDir).find((item) => artifactHasContent(item) && artifactRealPathInside(item, outDir));
+    if (!existingPath) continue;
+    const resolved = realpathSync(existingPath).toLowerCase();
+    return hashEvidence ? `${resolved}#${hashEvidence}` : resolved;
+  }
+  return hashEvidence;
+}
+
+function residualAttemptHasNumericCoverage(attempt) {
+  return coverageImprovementScore(attemptCoverageObject(attempt)) !== null;
+}
+
+function analyzeResidualCoverageProgress(attempts, outDir = null) {
+  const sorted = (attempts || [])
+    .map((attempt, index) => ({ attempt, index, number: Number(attempt?.attempt) }))
+    .filter(({ attempt }) => attempt && typeof attempt === "object")
+    .sort((a, b) => {
+      const aNumber = Number.isFinite(a.number) ? a.number : Number.MAX_SAFE_INTEGER;
+      const bNumber = Number.isFinite(b.number) ? b.number : Number.MAX_SAFE_INTEGER;
+      return aNumber - bNumber || a.index - b.index;
+    });
+  const seenChangeKeys = new Set();
+  const duplicateChangeKeys = new Set();
+  const validAttempts = [];
+  const invalidAttempts = [];
+  for (const item of sorted) {
+    const attempt = item.attempt;
+    const changeKey = repairChangeArtifactKey(attempt, outDir);
+    const hasActionEvidence = residualAttemptHasEvidence(attempt, outDir);
+    const hasMeasurementEvidence = residualAttemptHasMeasurementEvidence(attempt, outDir);
+    const coverage = attemptCoverageObject(attempt);
+    const score = coverageImprovementScore(coverage);
+    const number = Number.isFinite(item.number) ? item.number : item.index + 1;
+    const invalidReasons = [];
+    if (!changeKey) invalidReasons.push("missing_distinct_generated_artifact_change");
+    if (changeKey && seenChangeKeys.has(changeKey)) invalidReasons.push("duplicate_generated_artifact_change_without_snapshot_hash");
+    if (!hasActionEvidence) invalidReasons.push("missing_action_evidence");
+    if (!hasMeasurementEvidence) invalidReasons.push("missing_measurement_evidence");
+    if (score === null) invalidReasons.push("missing_numeric_after_coverage");
+    if (invalidReasons.length > 0) {
+      if (changeKey && seenChangeKeys.has(changeKey)) duplicateChangeKeys.add(changeKey);
+      invalidAttempts.push({ attempt: number, changeKey, reasons: invalidReasons });
+      continue;
+    }
+    seenChangeKeys.add(changeKey);
+    validAttempts.push({
+      attempt: number,
+      changeKey,
+      score,
+      coverage,
+      metrics: coverageMetricSummary(coverage)
+    });
+  }
+  let previous = null;
+  let consecutiveNoIncrease = 0;
+  let longestNoIncreaseStreak = 0;
+  let lastDelta = null;
+  let latestTrend = "unknown";
+  const trend = [];
+  for (const current of validAttempts) {
+    if (previous) {
+      const delta = current.score - previous.score;
+      lastDelta = delta;
+      const improved = delta > 0.000001;
+      if (improved) {
+        consecutiveNoIncrease = 0;
+        latestTrend = "improved";
+      } else {
+        consecutiveNoIncrease += 1;
+        longestNoIncreaseStreak = Math.max(longestNoIncreaseStreak, consecutiveNoIncrease);
+        latestTrend = "no_increase";
+      }
+      trend.push({
+        fromAttempt: previous.attempt,
+        toAttempt: current.attempt,
+        delta,
+        improved
+      });
+    }
+    previous = current;
+  }
+  const validAttemptNumbers = validAttempts.map((item) => item.attempt).filter((value) => Number.isInteger(value) && value > 0);
+  const maxValidAttemptNumber = validAttemptNumbers.length > 0 ? Math.max(...validAttemptNumbers) : 0;
+  const validAttemptSequenceComplete = maxValidAttemptNumber === 0
+    || Array.from({ length: maxValidAttemptNumber }, (_item, index) => index + 1).every((attempt) => validAttemptNumbers.includes(attempt));
+  return {
+    validAttempts,
+    invalidAttempts,
+    duplicateChangeKeyCount: duplicateChangeKeys.size,
+    validAttemptCount: validAttempts.length,
+    consecutiveNoIncrease,
+    longestNoIncreaseStreak,
+    noIncreaseLimit: 2,
+    validAttemptSequenceComplete,
+    plateauSatisfied: consecutiveNoIncrease >= 2,
+    lastDelta,
+    latestTrend,
+    trend
+  };
 }
 
 function evidencePathCandidates(value, outDir) {
@@ -4626,8 +4814,7 @@ function targetStopIsAcceptable(entry, maxAttempts = C_RESIDUAL_MAX_ATTEMPTS, ou
   ].some((value) => residualActionEvidencePathExists(value, outDir));
   return classified
     ? (hasAttemptEvidence || hasEntryEvidencePath)
-    : ((entry?.goalReached === true || entry?.coverageGoalReached === true) && hasAttemptEvidence && hasAttemptMeasurementEvidence)
-      || (attempts.length >= maxAttempts && residualAttemptSequenceComplete(attempts, maxAttempts) && residualAttemptEvidenceComplete(attempts, maxAttempts, outDir));
+    : ((entry?.goalReached === true || entry?.coverageGoalReached === true) && hasAttemptEvidence && hasAttemptMeasurementEvidence);
 }
 
 function clearFinalBlockingAction(action, message) {
@@ -4674,6 +4861,11 @@ function buildCFinalEvidenceGate({ report, outDir }) {
   const aggregateAttemptSequenceComplete = Array.from({ length: maxAttemptsPerFunction }, (_, index) => index + 1)
     .every((attempt) => aggregateAttemptNumbers.has(attempt));
   const aggregateAttemptEvidenceComplete = residualAttemptEvidenceComplete(attempts, maxAttemptsPerFunction, outDir);
+  const residualCoverageProgress = analyzeResidualCoverageProgress(attempts, outDir);
+  const coveragePlateauSatisfied = !rawGoalReached && residualCoverageProgress.plateauSatisfied;
+  const duplicateRepairAttemptEvidence = residualCoverageProgress.invalidAttempts.some((item) =>
+    item.reasons.includes("duplicate_generated_artifact_change_without_snapshot_hash")
+    && !item.reasons.includes("missing_numeric_after_coverage"));
   const hasResidualAttemptEvidence = attempts.some((attempt) => residualAttemptHasEvidence(attempt, outDir));
   const hasResidualMeasurementEvidence = attempts.some((attempt) => residualAttemptHasMeasurementEvidence(attempt, outDir));
   const hasPerFunctionEvidence = perFunction.some((entry) => targetStopIsAcceptable(entry, maxAttemptsPerFunction, outDir));
@@ -4685,13 +4877,14 @@ function buildCFinalEvidenceGate({ report, outDir }) {
     && aggregateAttemptSequenceComplete
     && aggregateAttemptEvidenceComplete
     && allTargetsClassified;
+  const residualStopSatisfied = goalReached || coveragePlateauSatisfied;
   const coveredTargets = new Set([
     ...attempts.map(residualTargetName).filter(Boolean),
     ...perFunction.map(residualTargetName).filter(Boolean),
     ...classifiedTargetNames
   ]);
-  const missingTargets = aggregateEvidenceSatisfied ? [] : targetNames.filter((name) => !coveredTargets.has(name));
-  const incompleteTargets = aggregateEvidenceSatisfied
+  const missingTargets = residualStopSatisfied ? [] : targetNames.filter((name) => !coveredTargets.has(name));
+  const incompleteTargets = residualStopSatisfied
     ? []
     : perFunction
       .filter((item) => !targetStopIsAcceptable(item, maxAttemptsPerFunction, outDir))
@@ -4699,20 +4892,28 @@ function buildCFinalEvidenceGate({ report, outDir }) {
   const blockers = [];
   if (required && !history.path && attempts.length === 0 && perFunction.length === 0) blockers.push("missing_residual_attempt_history");
   if (required && !goalReached && targetNames.length === 0) blockers.push("residual_targets_missing");
-  if (required && !goalReached && !aggregateEvidenceSatisfied && aggregateAttemptCount < maxAttemptsPerFunction && perFunction.length === 0) {
-    blockers.push("aggregate_residual_attempts_below_required");
+  if (required && !goalReached && attempts.length > 0 && duplicateRepairAttemptEvidence) {
+    blockers.push("residual_attempts_not_distinct_generated_artifact_changes");
   }
-  if (required && !goalReached && aggregateAttemptCount >= maxAttemptsPerFunction && !aggregateAttemptSequenceComplete && perFunction.length === 0) {
-    blockers.push("aggregate_residual_attempt_sequence_incomplete");
+  if (required && !goalReached && attempts.length > 0 && residualCoverageProgress.validAttemptCount === 0) {
+    blockers.push("residual_repair_attempts_without_measured_generated_artifact_changes");
   }
-  if (required && !goalReached && aggregateAttemptSequenceComplete && !aggregateAttemptEvidenceComplete && perFunction.length === 0) {
-    blockers.push("aggregate_residual_attempt_evidence_incomplete");
+  if (required && !goalReached && residualCoverageProgress.validAttemptCount > 0 && !residualCoverageProgress.validAttemptSequenceComplete) {
+    blockers.push("residual_repair_attempt_sequence_incomplete");
+  }
+  if (required && !goalReached && !coveragePlateauSatisfied && residualCoverageProgress.validAttemptCount === 0) {
+    blockers.push("coverage_growth_attempts_missing");
+  }
+  if (required && !goalReached && attempts.length > 0 && residualCoverageProgress.validAttemptCount > 0 && !coveragePlateauSatisfied) {
+    blockers.push(residualCoverageProgress.latestTrend === "improved"
+      ? "coverage_still_increasing_retry_required"
+      : "coverage_no_improvement_streak_below_required");
   }
   if (required && rawGoalReached && !finalCoverageEvidenceComplete) {
     blockers.push("final_coverage_evidence_missing");
   }
-  if (required && !goalReached && targetNames.length > 0 && missingTargets.length > 0) blockers.push("residual_targets_without_attempt_history");
-  if (required && !goalReached && incompleteTargets.length > 0) blockers.push("residual_targets_without_max_attempt_or_stop_reason");
+  if (required && !residualStopSatisfied && targetNames.length > 0 && missingTargets.length > 0) blockers.push("residual_targets_without_attempt_history");
+  if (required && !residualStopSatisfied && incompleteTargets.length > 0) blockers.push("residual_targets_without_stop_reason_or_plateau");
   const staleReportState = required && report?.finalAnswerAllowed === false && blockers.length === 0;
   return {
     schemaVersion: "perfectone.c.final-evidence-gate.v1",
@@ -4732,6 +4933,8 @@ function buildCFinalEvidenceGate({ report, outDir }) {
     aggregateAttemptSequenceComplete,
     aggregateAttemptEvidenceComplete,
     aggregateEvidenceSatisfied,
+    coveragePlateauSatisfied,
+    residualCoverageProgress,
     classifiedRemainingGapCount: classifiedRemainingGaps.length,
     finalCoverageGoalReached: goalReached,
     rawFinalCoverageGoalReached: rawGoalReached,

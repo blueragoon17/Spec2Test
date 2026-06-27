@@ -418,7 +418,7 @@ async function main() {
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.fallbackOrder?.join(",") === "docker-klee-baseline,windows-local-llvm-lld-link,local-no-klee", "Coding-agent residual fallback order is wrong");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.owner === "Coding Agent", "Residual owner should be Coding Agent");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.maxAttempts === 5, "Coding-agent residual max attempts is not 5");
-    assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.noImprovementLimit === 1, "Coding-agent residual no-improvement early-stop limit is not 1");
+    assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.noImprovementLimit === 2, "Coding-agent residual no-improvement early-stop limit is not 2");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.continuationRule?.includes("coverage-increasing"), "Coding-agent residual continuation rule missing");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.mustDirectlyModifyGeneratedArtifacts === true, "Coding-agent residual policy must require generated artifact edits");
     assert(result.report?.cUnitVerificationFlow?.codingAgentTestAugmentation?.executionRequired === true, "Coding-agent test augmentation must be required after baseline coverage");
@@ -428,7 +428,7 @@ async function main() {
     assert(result.report?.cUnitVerificationFlow?.codingAgentTestAugmentation?.codeOnlyDefault?.conditionalExecute?.includes("undefined_behavior_corner"), "UB conditional augmentation missing");
     assert(Array.isArray(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction), "Coding-agent residual per-function loop missing");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.every((item) => item.residualLoop?.maxAttempts === 5), "Per-function residual max attempts is not 5");
-    assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.every((item) => item.residualLoop?.noImprovementLimit === 1), "Per-function residual no-improvement early-stop limit is not 1");
+    assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.every((item) => item.residualLoop?.noImprovementLimit === 2), "Per-function residual no-improvement early-stop limit is not 2");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.every((item) => item.residualLoop?.continuationRule?.includes("next attempt is mandatory")), "Per-function residual continuation rule missing");
     assert(result.report?.residualTargets?.some((item) => item.function === "alpha" && item.reason === "per_function_coverage_below_goal"), "alpha per-function residual target was not detected");
     assert(!result.report?.residualTargets?.some((item) => item.function === "beta"), "beta should not be a residual target when per-function coverage is 100%");
@@ -481,9 +481,9 @@ async function main() {
     assert(html.includes("PerfectOne Coverage"), "HTML report missing PerfectOne cumulative coverage section");
     assert(html.includes("Coding Agent Applied Cumulative"), "HTML report missing coding-agent cumulative coverage section");
     assert(html.includes("Coding Agent Increase"), "HTML report missing coding-agent increase section");
-    assert(html.includes("5 coding-agent residual attempts per function"), "HTML report missing 5-attempt coding-agent residual budget");
+    assert(html.includes("5 coding-agent residual attempts per function"), "HTML report missing legacy attempt accounting field");
     assert(html.includes("Early-stop evidence threshold"), "HTML report missing early-stop evidence threshold");
-    assert(html.includes("not the primary retry count"), "HTML report must not present the no-improvement threshold as the primary retry count");
+    assert(html.includes("Max-attempt count alone is not a stop condition"), "HTML report must not present max attempts as the stop condition");
     assert(html.includes("Struct depth"), "HTML report missing coverage option clamp section");
     assert(html.includes("OAuth configured"), "HTML report missing OAuth token usage status");
     assert(html.includes("x=42") || html.includes("&quot;x&quot;:42"), "HTML report missing failure input value");

@@ -99,29 +99,28 @@ try {
   const blockedPath = path.join(reportDir, "FINAL_REPORT_BLOCKED.md");
   if (!existsSync(blockedPath)) throw new Error("expected blocked marker to exist");
 
+  const aggregateAttempts = [
+    { attempt: 1, changedArtifact: "residual_attempt1.c", reportPath: "residual_attempt1_report.txt", afterCoverage: { line: 90, branch: 80, function: 95, mcdc: 50 } },
+    { attempt: 2, changedArtifact: "residual_attempt2.c", reportPath: "residual_attempt2_report.txt", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } },
+    { attempt: 3, changedArtifact: "residual_attempt3.c", reportPath: "residual_attempt3_report.txt", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } },
+    { attempt: 4, changedArtifact: "residual_attempt4.c", reportPath: "residual_attempt4_report.txt", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } }
+  ];
   const historyJson = JSON.stringify({
     schemaVersion: "perfectone.coding-agent-residual-attempt-history.v1",
     bestCodingAgentCoverage: { line: { pct: 95 }, branch: { pct: 90 } },
-    aggregateAttempts: [
-      {
-        function: "target_func",
-        attempt: 1,
-        changedArtifact: "residual_attempt1.c",
-        beforeCoverage: { line: 75 },
-        afterCoverage: { line: 95 },
-        delta: { line: 20 }
-      }
-    ],
+    aggregateAttempts,
     perFunctionAttempts: [
       {
         function: "target_func",
-        attempts: [{ attempt: 1, changedArtifact: "residual_attempt1.c", reportPath: "residual_attempt1_report.txt" }],
+        attempts: aggregateAttempts,
         stopReason: "max-coverage: remaining branch requires infeasible state"
       }
     ]
   }, null, 2);
-  writeFileSync(path.join(residualDir, "residual_attempt1.c"), "/* generated residual attempt */\n");
-  writeFileSync(path.join(residualDir, "residual_attempt1_report.txt"), "residual coverage report\n");
+  for (const attempt of aggregateAttempts) {
+    writeFileSync(path.join(residualDir, attempt.changedArtifact), `/* generated residual attempt ${attempt.attempt} */\n`);
+    writeFileSync(path.join(residualDir, attempt.reportPath), `residual coverage report ${attempt.attempt}\n`);
+  }
   writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), Buffer.concat([
     Buffer.from([0xEF, 0xBB, 0xBF]),
     Buffer.from(historyJson, "utf8")
@@ -129,6 +128,9 @@ try {
 
   const passed = runValidate(3);
   if (passed.status !== "passed") throw new Error(`expected passed, got ${passed.status}: ${JSON.stringify(passed)}`);
+  if (passed.coveragePlateauSatisfied !== true || passed.residualCoverageProgress?.consecutiveNoIncrease < 2) {
+    throw new Error(`expected two consecutive no-increase attempts to satisfy plateau stop: ${JSON.stringify(passed)}`);
+  }
   if (passed.perFunctionCount < 1 || passed.hasPerFunctionEvidence !== true) {
     throw new Error(`perFunctionAttempts was not recognized: ${JSON.stringify(passed)}`);
   }
