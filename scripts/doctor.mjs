@@ -257,6 +257,7 @@ if (errors.length === 0) {
       "perfectone_run_filtered_c_coverage",
       "perfectone_get_coverage_job_status",
       "perfectone_collect_coverage_job_result",
+      "perfectone_validate_c_final_evidence",
       "perfectone_cancel_coverage_job",
       "perfectone_get_artifact_manifest",
       "perfectone_replay"

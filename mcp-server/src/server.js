@@ -548,15 +548,31 @@ function normalizeTargetOs(value = "auto", hostOs = normalizeHostOs()) {
 }
 
 function normalizeEnvironment(environment = {}) {
-  const hostOs = normalizeHostOs(environment.hostOs);
-  const targetOs = normalizeTargetOs(environment.targetOs, hostOs);
+  const hostOs = normalizeHostOs(environment.hostOs ?? environment.hostOS);
+  const targetOs = normalizeTargetOs(environment.targetOs ?? environment.targetOS, hostOs);
+  const { hostOS, targetOS, ...rest } = environment;
   return {
-    ...environment,
+    ...rest,
     hostOs,
     targetOs,
     wslDistro: environment.wslDistro || DEFAULT_WSL_DISTRO,
     isEmbeddedTarget: EMBEDDED_TARGETS.has(targetOs)
   };
+}
+
+function sanitizeJsonValue(value, seen = new WeakSet()) {
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeJsonValue(item, seen));
+  const out = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if ((key === "hostOS" || key === "targetOS") && (Object.prototype.hasOwnProperty.call(value, "hostOs") || Object.prototype.hasOwnProperty.call(value, "targetOs"))) {
+      continue;
+    }
+    out[key] = sanitizeJsonValue(raw, seen);
+  }
+  return out;
 }
 
 function runWslCli(wslCli, args, options = {}) {
@@ -4143,6 +4159,121 @@ function renderHtmlReport(report, diagnosticSummary) {
 `;
 }
 
+function normalizeAttemptHistory(raw) {
+  if (!raw) return { attempts: [], perFunction: [], finalCoverage: null, source: null };
+  if (Array.isArray(raw)) return { attempts: raw, perFunction: [], finalCoverage: null, source: null };
+  return {
+    attempts: Array.isArray(raw.attempts) ? raw.attempts : [],
+    perFunction: Array.isArray(raw.perFunction) ? raw.perFunction : [],
+    finalCoverage: raw.finalCoverage || raw.coverage || null,
+    source: raw.source || null
+  };
+}
+
+function loadResidualAttemptHistory(outDir, report) {
+  const embedded = report?.codingAgentResidualAttemptHistory || report?.codingAgentResidualRepairPlan?.attemptHistory || null;
+  if (embedded) return { ...normalizeAttemptHistory(embedded), path: "embedded-report" };
+  const candidates = [
+    path.join(outDir, "mcp_reports", "coding_agent_residual_attempt_history.json"),
+    path.join(outDir, "coding_agent_residual_attempt_history.json"),
+    path.join(outDir, "codex_aug", "coding_agent_residual_attempt_history.json"),
+    path.join(outDir, "reports", "coding_agent_residual_attempt_history.json")
+  ];
+  for (const candidate of candidates) {
+    const parsed = readJsonWithFallbackSync(candidate, null);
+    if (parsed) return { ...normalizeAttemptHistory(parsed), path: candidate };
+  }
+  return { attempts: [], perFunction: [], finalCoverage: null, path: null, source: null };
+}
+
+function coverageGoalReached(finalCoverage) {
+  if (!finalCoverage || typeof finalCoverage !== "object") return false;
+  const values = ["line", "branch", "function", "mcdc"]
+    .map((key) => finalCoverage[key]?.pct ?? finalCoverage[key])
+    .filter((value) => typeof value === "number");
+  return values.length > 0 && values.every((value) => value >= C_COVERAGE_GOAL_PERCENT);
+}
+
+function targetStopIsAcceptable(entry) {
+  const attempts = Array.isArray(entry?.attempts) ? entry.attempts : [];
+  const stopReason = String(entry?.stopReason || entry?.status || "").toLowerCase();
+  const classified = ["max-coverage", "max_coverage", "infeasible", "crash-risk", "crash_risk", "toolchain-blocked", "toolchain_blocked"].some((needle) => stopReason.includes(needle));
+  return attempts.length >= C_RESIDUAL_MAX_ATTEMPTS || classified || entry?.goalReached === true || entry?.coverageGoalReached === true;
+}
+
+function buildCFinalEvidenceGate({ report, outDir }) {
+  const action = report?.actionRequired || report?.codingAgentResidualActionRequired || {};
+  const residualPlan = report?.codingAgentResidualRepairPlan || {};
+  const required = Boolean(action.required || residualPlan.executionRequired || report?.completionBlocked || report?.finalAnswerAllowed === false);
+  const history = loadResidualAttemptHistory(outDir, report);
+  const targetNames = (residualPlan.targets || report?.residualTargets || [])
+    .map((item) => item.function || item.symbol)
+    .filter(Boolean);
+  const perFunction = history.perFunction || [];
+  const attempts = history.attempts || [];
+  const goalReached = coverageGoalReached(history.finalCoverage) || history.finalCoverageGoalReached === true || history.coverageGoalReached === true;
+  const coveredTargets = new Set([
+    ...attempts.map((item) => item.function || item.targetFunction || item.symbol).filter(Boolean),
+    ...perFunction.map((item) => item.function || item.targetFunction || item.symbol).filter(Boolean)
+  ]);
+  const missingTargets = targetNames.filter((name) => !coveredTargets.has(name));
+  const incompleteTargets = perFunction
+    .filter((item) => !targetStopIsAcceptable(item))
+    .map((item) => item.function || item.targetFunction || item.symbol || "unknown");
+  const blockers = [];
+  if (required && !history.path && attempts.length === 0 && perFunction.length === 0) blockers.push("missing_residual_attempt_history");
+  if (required && !goalReached && targetNames.length > 0 && missingTargets.length > 0) blockers.push("residual_targets_without_attempt_history");
+  if (required && !goalReached && incompleteTargets.length > 0) blockers.push("residual_targets_without_max_attempt_or_stop_reason");
+  if (required && report?.finalAnswerAllowed === false && !goalReached && blockers.length === 0) blockers.push("mcp_final_answer_still_blocked");
+  return {
+    schemaVersion: "perfectone.c.final-evidence-gate.v1",
+    status: blockers.length > 0 ? "blocked" : "passed",
+    required,
+    finalAnswerAllowed: blockers.length === 0,
+    completionBlocked: blockers.length > 0,
+    nextRequiredAction: blockers.length > 0 ? "execute_coding_agent_residual_repair_loop" : null,
+    blockers,
+    requiredTargets: targetNames,
+    missingTargets,
+    incompleteTargets,
+    attemptHistoryPath: history.path,
+    attemptCount: attempts.length,
+    perFunctionCount: perFunction.length,
+    finalCoverageGoalReached: goalReached,
+    maxAttemptsPerFunction: residualPlan.attemptAccounting?.maxAttemptsPerFunction ?? C_RESIDUAL_MAX_ATTEMPTS,
+    requiredEvidence: action.requiredEvidence || [],
+    message: blockers.length > 0
+      ? "Final verification reporting is blocked until Coding Agent residual repair evidence is recorded for the 100% coverage goal."
+      : "Final evidence gate passed."
+  };
+}
+
+function renderFinalEvidenceGateMarkdown(gate) {
+  return [
+    "# Final Report Blocked",
+    "",
+    gate.message,
+    "",
+    `- status: ${gate.status}`,
+    `- finalAnswerAllowed: ${gate.finalAnswerAllowed}`,
+    `- completionBlocked: ${gate.completionBlocked}`,
+    `- nextRequiredAction: ${gate.nextRequiredAction || "none"}`,
+    `- blockers: ${(gate.blockers || []).join(", ") || "none"}`,
+    `- attemptHistoryPath: ${gate.attemptHistoryPath || "missing"}`,
+    `- attemptCount: ${gate.attemptCount}`,
+    `- perFunctionCount: ${gate.perFunctionCount}`,
+    `- maxAttemptsPerFunction: ${gate.maxAttemptsPerFunction}`,
+    "",
+    "## Missing Targets",
+    "",
+    ...((gate.missingTargets || []).map((name) => `- ${name}`)),
+    "",
+    "## Required Evidence",
+    "",
+    ...((gate.requiredEvidence || []).map((item) => `- ${item}`))
+  ].join("\n");
+}
+
 async function writeReportBundle(outDir, report, diagnosticSummary, options = {}) {
   const generated = [];
   try {
@@ -4154,7 +4285,8 @@ async function writeReportBundle(outDir, report, diagnosticSummary, options = {}
     const jsonPath = path.join(reportDir, `${reportBaseName}.json`);
     const mdPath = path.join(reportDir, `${reportBaseName}.md`);
     const htmlPath = path.join(reportDir, `${reportBaseName}.html`);
-    await writeFile(jsonPath, JSON.stringify(report, null, 2), "utf8");
+    const sanitizedReport = sanitizeJsonValue(report);
+    await writeFile(jsonPath, JSON.stringify(sanitizedReport, null, 2), "utf8");
     await writeFile(mdPath, renderMarkdownReport(report, diagnosticSummary), "utf8");
     let htmlText = "";
     try {
@@ -4199,6 +4331,15 @@ async function writeReportBundle(outDir, report, diagnosticSummary, options = {}
       generated.push(artifactEntry(tokenPath, outDir, "token-usage"));
     }
     if (report.codingAgentResidualActionRequired?.required) {
+      const gate = buildCFinalEvidenceGate({ report, outDir });
+      const gatePath = path.join(reportDir, isCanonicalReport ? "final_evidence_gate.json" : `${reportBaseName}_final_evidence_gate.json`);
+      await writeFile(gatePath, JSON.stringify(sanitizeJsonValue(gate), null, 2), "utf8");
+      generated.push(artifactEntry(gatePath, outDir, "final-evidence-gate"));
+      if (gate.status === "blocked") {
+        const blockedPath = path.join(reportDir, isCanonicalReport ? "FINAL_REPORT_BLOCKED.md" : `${reportBaseName}_FINAL_REPORT_BLOCKED.md`);
+        await writeFile(blockedPath, renderFinalEvidenceGateMarkdown(gate), "utf8");
+        generated.push(artifactEntry(blockedPath, outDir, "final-report-blocker"));
+      }
       const residualPath = path.join(reportDir, isCanonicalReport ? "coding_agent_residual_required.md" : `${reportBaseName}_coding_agent_residual_required.md`);
       const action = report.codingAgentResidualActionRequired;
       const residualDoc = [
@@ -8895,6 +9036,38 @@ async function collectCoverageJobResult(args) {
   };
 }
 
+async function validateCFinalEvidence(args = {}) {
+  const outDir = path.resolve(args.outDir || workspaceRoot);
+  const reportPath = args.reportPath
+    ? path.resolve(args.reportPath)
+    : path.join(outDir, "mcp_reports", "perfectone_mcp_report.json");
+  const report = readJsonWithFallbackSync(reportPath, null);
+  if (!report) {
+    return {
+      status: "blocked",
+      code: "mcp_report_missing",
+      finalAnswerAllowed: false,
+      completionBlocked: true,
+      nextRequiredAction: "run_perfectone_c_coverage_before_final_report",
+      message: `No MCP report was found at ${reportPath}.`
+    };
+  }
+  const gate = buildCFinalEvidenceGate({ report, outDir });
+  const reportDir = path.join(outDir, "mcp_reports");
+  await mkdir(reportDir, { recursive: true });
+  const gatePath = path.join(reportDir, "final_evidence_gate.json");
+  await writeFile(gatePath, JSON.stringify(sanitizeJsonValue(gate), null, 2), "utf8");
+  if (gate.status === "blocked") {
+    await writeFile(path.join(reportDir, "FINAL_REPORT_BLOCKED.md"), renderFinalEvidenceGateMarkdown(gate), "utf8");
+  }
+  return {
+    ...gate,
+    gatePath,
+    reportPath,
+    outDir
+  };
+}
+
 async function cancelCoverageJob(args) {
   const job = args.jobId ? coverageJobs.get(args.jobId) : null;
   if (!job?.child) {
@@ -9103,6 +9276,10 @@ async function callTool(name, args) {
 
   if (name === "perfectone_collect_coverage_job_result") {
     return collectCoverageJobResult(args);
+  }
+
+  if (name === "perfectone_validate_c_final_evidence") {
+    return validateCFinalEvidence(args);
   }
 
   if (name === "perfectone_cancel_coverage_job") {
@@ -9532,6 +9709,18 @@ const tools = [
     }
   },
   {
+    name: "perfectone_validate_c_final_evidence",
+    description: "Validate that C final reporting is allowed. Blocks final answers when MCP residual repair is still required, attempt history is missing, or the 100% coverage goal lacks residual evidence.",
+    inputSchema: {
+      type: "object",
+      required: ["outDir"],
+      properties: {
+        outDir: { type: "string" },
+        reportPath: { type: "string" }
+      }
+    }
+  },
+  {
     name: "perfectone_cancel_coverage_job",
     description: "Cancel a live background C coverage job started by this MCP server session.",
     inputSchema: {
@@ -9579,7 +9768,7 @@ async function handle(message) {
       result: {
         protocolVersion: "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "perfectone-unit-verify", version: "0.1.0" }
+        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.3" }
       }
     });
     return;

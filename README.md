@@ -190,6 +190,16 @@ A successful C run should preserve or link:
 - LCOV, HTML coverage, manifest, logs, KLEE testcase files, and residual
   harness artifacts.
 
+Final reporting is gated by `mcp_reports/final_evidence_gate.json`. When
+PerfectOne baseline coverage is below the 100% goal, the
+`perfectone_validate_c_final_evidence` MCP tool blocks final reporting until
+Coding Agent residual evidence is recorded in
+`mcp_reports/coding_agent_residual_attempt_history.json`. A single augmentation
+harness is not enough if coverage increased but remains below 100%; residual
+repair must continue up to five generated-artifact edit/replay/remeasure
+attempts per target function unless the remaining gap is classified with
+evidence as max-coverage, infeasible, crash-risk, or toolchain-blocked.
+
 ## Troubleshooting
 
 - `dockerDesktopLinuxEngine` pipe missing: Docker Desktop is mandatory. Start

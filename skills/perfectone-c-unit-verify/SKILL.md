@@ -54,6 +54,10 @@ Use this skill for C targets only. For `.cc`, `.cpp`, `.cxx`, or non-C files, do
    - Review for UB corner-case risk and execute UB testcases only when the code plausibly contains null/invalid pointer, bounds, signed overflow, divide-by-zero, uninitialized-read, invalid-state, or size-mismatch risk.
    - Review for AB corner-case risk and execute AB testcases only when the code/spec plausibly contains invalid mode/state, error return, exception, timeout, resource exhaustion, or unsupported input format risk.
    - When specification artifacts or specification-derived manual tests are attached, also execute manual testcase seeds, decision-table, state-transition, boundary-value, and equivalence-partition testcases and record why each technique was applied or marked `not_applicable`.
+12. Before any final answer or final HTML summary, call `perfectone_validate_c_final_evidence` with the current `outDir`.
+   - If it returns `status: "blocked"` or `finalAnswerAllowed: false`, do not summarize the run as complete. Continue the required residual loop or report the exact external blocker.
+   - A hand-written Codex summary HTML must not replace the MCP final evidence gate.
+   - Do not call the final answer complete while `mcp_reports/FINAL_REPORT_BLOCKED.md` or `mcp_reports/final_evidence_gate.json` says blocked.
 
 ## Unit Design Artifact Handoff
 
@@ -168,6 +172,8 @@ Embedded path:
 - For each residual target function, the coding agent must run the residual repair loop up to 5 attempts to improve coverage. Each attempt must change a generated harness, fixture, stub, or testcase input and then recompile/replay/remeasure.
 - Stop before the 5th attempt only when the requested metrics reach the 100% goal, or when a coding-agent attempt shows no coverage increase and the remaining gap is also classified with evidence as max-coverage, infeasible, crash-risk, or toolchain-blocked. No-improvement alone is not enough to stop; it needs the gap classification.
 - Do not spend the 5-attempt budget on global reruns that do not target a specific uncovered function or branch. Each attempt must name the target function, intended gap, changed generated artifact, replay command, before/after coverage, and stop reason.
+- Record residual attempt history as JSON at `mcp_reports/coding_agent_residual_attempt_history.json` before final reporting. The file must contain either `finalCoverageGoalReached: true` or per-function attempt records showing 5 attempts or a justified stop reason such as `max-coverage`, `infeasible`, `crash-risk`, or `toolchain-blocked`.
+- After writing attempt history, call `perfectone_validate_c_final_evidence` again. The final answer is allowed only when that tool returns `status: "passed"`.
 - Keep initial artifact generation time separate from KLEE/replay time and coding-agent residual time.
 
 ## Coding Agent Test Augmentation
