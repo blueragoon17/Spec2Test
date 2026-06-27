@@ -57,7 +57,9 @@ Use this skill for C targets only. For `.cc`, `.cpp`, `.cxx`, or non-C files, do
 12. Before any final answer or final HTML summary, call `perfectone_validate_c_final_evidence` with the current `outDir`.
    - If it returns `status: "blocked"` or `finalAnswerAllowed: false`, do not summarize the run as complete. Continue the required residual loop or report the exact external blocker.
    - A hand-written Codex summary HTML must not replace the MCP final evidence gate.
-   - Do not call the final answer complete while `mcp_reports/FINAL_REPORT_BLOCKED.md` or `mcp_reports/final_evidence_gate.json` says blocked.
+   - Do not call the final answer complete while `mcp_reports/FINAL_REPORT_BLOCKED.md` exists or `mcp_reports/final_evidence_gate.json` says blocked.
+   - Do not create or present `coding_agent_final_report.html` as a final report before `perfectone_validate_c_final_evidence` returns `status: "passed"`.
+   - If a hand-written or generated HTML summary exists while the MCP gate is blocked, treat that HTML as a draft only and continue the residual loop.
 
 ## Unit Design Artifact Handoff
 
@@ -166,6 +168,8 @@ Embedded path:
 - The coding agent must actively improve residual coverage after the PerfectOne baseline. For each residual target function, run an iterative repair loop that directly edits or adds generated harnesses, fixtures, stubs, or testcase inputs, then recompiles/replays and remeasures coverage. Do not modify the user's original C source just to raise coverage.
 - The first action after `needs_coding_agent_residual` should be local file/shell work, not another summary: create or update a generated residual harness under the run output directory, compile it with an available local coverage toolchain such as GCC/gcov or LLVM coverage, execute it, inspect uncovered lines/branches, and repeat targeted generated-artifact edits.
 - A single residual harness attempt is not enough when it increases coverage but the 100% goal is still unmet. If an attempt improves function/line/branch/MC/DC coverage and any requested metric remains below 100%, immediately run the next coding-agent residual attempt.
+- Aggregate residual attempts count only when they are actual coverage-growth harness/testcase changes followed by compile/replay/remeasure. A crash-only probe such as `TD_main_0_0` does not consume or replace a coverage-growth retry attempt for the other residual targets.
+- If aggregate residual coverage improves and the 100% goal remains unmet, continue aggregate attempts until attempt 5 unless a subsequent attempt shows no coverage increase and all remaining gaps are classified with evidence. Do not stop after attempt 1, 2, or 3 merely because the current uncovered lines look explainable.
 - Do not begin residual repair by searching old run directories, old residual harnesses, or prior testcases for a finished answer. Prior artifacts may be used only as comparison evidence after a fresh current-run residual harness/testcase update has been made and remeasured.
 - If existing PerfectOne KLEE/native testcase files are reused, they must be copied or referenced from the current run and treated as baseline inputs. They do not satisfy the coding-agent residual attempt requirement unless the agent adds or modifies generated verification artifacts and shows before/after coverage.
 - The residual loop is function-scoped and coding-agent-owned. Docker/local KLEE reruns do not count as coding-agent residual attempts.
@@ -174,6 +178,7 @@ Embedded path:
 - Do not spend the 5-attempt budget on global reruns that do not target a specific uncovered function or branch. Each attempt must name the target function, intended gap, changed generated artifact, replay command, before/after coverage, and stop reason.
 - Record residual attempt history as JSON at `mcp_reports/coding_agent_residual_attempt_history.json` before final reporting. The file must contain either `finalCoverageGoalReached: true` or per-function attempt records showing 5 attempts or a justified stop reason such as `max-coverage`, `infeasible`, `crash-risk`, or `toolchain-blocked`.
 - After writing attempt history, call `perfectone_validate_c_final_evidence` again. The final answer is allowed only when that tool returns `status: "passed"`.
+- If the gate returns `aggregate_residual_attempts_below_required`, continue the generated-artifact retry loop. Do not replace this with a standalone summary HTML.
 - Keep initial artifact generation time separate from KLEE/replay time and coding-agent residual time.
 
 ## Coding Agent Test Augmentation

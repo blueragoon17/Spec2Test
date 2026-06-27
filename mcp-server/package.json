@@ -1,6 +1,6 @@
 {
   "name": "perfectone-unit-verify-mcp",
-  "version": "0.2.0-beta.6",
+  "version": "0.2.0-beta.7",
   "type": "module",
   "private": true,
   "description": "MCP stdio wrapper for source-derived unit design artifacts and PerfectOne C verification commands.",
@@ -13,7 +13,8 @@
     "test:filter": "node ./test/filter-smoke.mjs",
     "test:final-gate": "node ./test/final-evidence-gate-smoke.mjs",
     "test:full-orchestration": "node ./test/full-orchestration-smoke.mjs",
-    "test:residual-artifacts": "node ./test/residual-artifact-evidence-smoke.mjs"
+    "test:residual-artifacts": "node ./test/residual-artifact-evidence-smoke.mjs",
+    "test:residual-retry": "node ./test/residual-retry-required-smoke.mjs"
   },
   "engines": {
     "node": ">=18"

@@ -4241,7 +4241,7 @@ function discoverResidualEvidenceFromArtifacts(outDir) {
     }
     for (const entry of entries) {
       if (!entry.isFile()) continue;
-      const match = entry.name.match(/^residual_attempt(\d+).*\.(c|cc|cpp|exe|json|txt|info|profdata|profraw)$/i);
+      const match = entry.name.match(/^(?:residual_)?attempt(\d+).*\.(c|cc|cpp|exe|json|txt|info|profdata|profraw|log)$/i);
       if (!match) continue;
       const attempt = Number(match[1]);
       if (!Number.isFinite(attempt) || attempt <= 0) continue;
@@ -4406,6 +4406,9 @@ function buildCFinalEvidenceGate({ report, outDir }) {
       .map((item) => item.function || item.targetFunction || item.symbol || "unknown");
   const blockers = [];
   if (required && !history.path && attempts.length === 0 && perFunction.length === 0) blockers.push("missing_residual_attempt_history");
+  if (required && !goalReached && !aggregateEvidenceSatisfied && aggregateAttemptCount > 0 && aggregateAttemptCount < maxAttemptsPerFunction && perFunction.length === 0) {
+    blockers.push("aggregate_residual_attempts_below_required");
+  }
   if (required && !goalReached && targetNames.length > 0 && missingTargets.length > 0) blockers.push("residual_targets_without_attempt_history");
   if (required && !goalReached && incompleteTargets.length > 0) blockers.push("residual_targets_without_max_attempt_or_stop_reason");
   const staleReportState = required && report?.finalAnswerAllowed === false && blockers.length === 0;
@@ -10050,7 +10053,7 @@ async function handle(message) {
       result: {
         protocolVersion: "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.6" }
+        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.7" }
       }
     });
     return;
