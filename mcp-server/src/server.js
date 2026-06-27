@@ -4224,7 +4224,7 @@ function buildCFinalEvidenceGate({ report, outDir }) {
   if (required && !history.path && attempts.length === 0 && perFunction.length === 0) blockers.push("missing_residual_attempt_history");
   if (required && !goalReached && targetNames.length > 0 && missingTargets.length > 0) blockers.push("residual_targets_without_attempt_history");
   if (required && !goalReached && incompleteTargets.length > 0) blockers.push("residual_targets_without_max_attempt_or_stop_reason");
-  if (required && report?.finalAnswerAllowed === false && !goalReached && blockers.length === 0) blockers.push("mcp_final_answer_still_blocked");
+  const staleReportState = required && report?.finalAnswerAllowed === false && blockers.length === 0;
   return {
     schemaVersion: "perfectone.c.final-evidence-gate.v1",
     status: blockers.length > 0 ? "blocked" : "passed",
@@ -4240,6 +4240,7 @@ function buildCFinalEvidenceGate({ report, outDir }) {
     attemptCount: attempts.length,
     perFunctionCount: perFunction.length,
     finalCoverageGoalReached: goalReached,
+    staleReportState,
     maxAttemptsPerFunction: residualPlan.attemptAccounting?.maxAttemptsPerFunction ?? C_RESIDUAL_MAX_ATTEMPTS,
     requiredEvidence: action.requiredEvidence || [],
     message: blockers.length > 0
@@ -4272,6 +4273,48 @@ function renderFinalEvidenceGateMarkdown(gate) {
     "",
     ...((gate.requiredEvidence || []).map((item) => `- ${item}`))
   ].join("\n");
+}
+
+function applyPassedFinalEvidenceGateToReport(report, gate) {
+  const normalized = { ...report };
+  normalized.status = normalized.status === "needs_coding_agent_residual" || normalized.status === "needs_coding_agent_augmentation"
+    ? "completed_with_coding_agent_residual"
+    : (normalized.status || "completed_with_coding_agent_residual");
+  normalized.mcpStatus = normalized.mcpStatus === "needs_coding_agent_residual" || normalized.mcpStatus === "needs_coding_agent_augmentation"
+    ? "completed_with_coding_agent_residual"
+    : (normalized.mcpStatus || normalized.status);
+  normalized.completionBlocked = false;
+  normalized.finalAnswerAllowed = true;
+  normalized.nextRequiredAction = null;
+  normalized.finalEvidenceGate = gate;
+  if (normalized.actionRequired) {
+    normalized.actionRequired = {
+      ...normalized.actionRequired,
+      required: false,
+      completionBlocked: false,
+      finalAnswerAllowed: true,
+      nextRequiredAction: null,
+      reason: "Coding-agent residual evidence satisfied the final evidence gate."
+    };
+  }
+  if (normalized.codingAgentResidualActionRequired) {
+    normalized.codingAgentResidualActionRequired = {
+      ...normalized.codingAgentResidualActionRequired,
+      required: false,
+      completionBlocked: false,
+      finalAnswerAllowed: true,
+      nextRequiredAction: null,
+      reason: "Coding-agent residual evidence satisfied the final evidence gate."
+    };
+  }
+  if (normalized.codingAgentResidualRepairPlan) {
+    normalized.codingAgentResidualRepairPlan = {
+      ...normalized.codingAgentResidualRepairPlan,
+      executionRequired: false,
+      attemptHistory: gate.attemptHistoryPath || normalized.codingAgentResidualRepairPlan.attemptHistory || null
+    };
+  }
+  return normalized;
 }
 
 async function writeReportBundle(outDir, report, diagnosticSummary, options = {}) {
@@ -4320,6 +4363,10 @@ async function writeReportBundle(outDir, report, diagnosticSummary, options = {}
     generated.push(artifactEntry(jsonPath, outDir, "aggregate-report"));
     generated.push(artifactEntry(mdPath, outDir, "aggregate-report"));
     generated.push(artifactEntry(htmlPath, outDir, "aggregate-report"));
+    if (report.finalAnswerAllowed === true && report.completionBlocked === false) {
+      const staleBlockedPath = path.join(reportDir, isCanonicalReport ? "FINAL_REPORT_BLOCKED.md" : `${reportBaseName}_FINAL_REPORT_BLOCKED.md`);
+      if (existsSync(staleBlockedPath)) unlinkSync(staleBlockedPath);
+    }
     if (report.failureEvidence) {
       const failurePath = path.join(reportDir, isCanonicalReport ? "failure_evidence.json" : `${reportBaseName}_failure_evidence.json`);
       await writeFile(failurePath, JSON.stringify(report.failureEvidence, null, 2), "utf8");
@@ -9057,8 +9104,27 @@ async function validateCFinalEvidence(args = {}) {
   await mkdir(reportDir, { recursive: true });
   const gatePath = path.join(reportDir, "final_evidence_gate.json");
   await writeFile(gatePath, JSON.stringify(sanitizeJsonValue(gate), null, 2), "utf8");
+  const blockedPath = path.join(reportDir, "FINAL_REPORT_BLOCKED.md");
+  const allowedPath = path.join(reportDir, "FINAL_REPORT_ALLOWED.md");
   if (gate.status === "blocked") {
-    await writeFile(path.join(reportDir, "FINAL_REPORT_BLOCKED.md"), renderFinalEvidenceGateMarkdown(gate), "utf8");
+    await writeFile(blockedPath, renderFinalEvidenceGateMarkdown(gate), "utf8");
+    if (existsSync(allowedPath)) unlinkSync(allowedPath);
+  } else {
+    const normalizedReport = applyPassedFinalEvidenceGateToReport(report, gate);
+    await writeFile(reportPath, JSON.stringify(sanitizeJsonValue(normalizedReport), null, 2), "utf8");
+    if (existsSync(blockedPath)) unlinkSync(blockedPath);
+    await writeFile(allowedPath, [
+      "# Final Report Allowed",
+      "",
+      "Coding-agent residual evidence satisfied the final evidence gate.",
+      "",
+      `- status: ${gate.status}`,
+      `- finalAnswerAllowed: ${gate.finalAnswerAllowed}`,
+      `- attemptHistoryPath: ${gate.attemptHistoryPath || "none"}`,
+      `- attemptCount: ${gate.attemptCount}`,
+      `- perFunctionCount: ${gate.perFunctionCount}`,
+      `- staleReportStateCorrected: ${gate.staleReportState ? "yes" : "no"}`
+    ].join("\n"), "utf8");
   }
   return {
     ...gate,
@@ -9768,7 +9834,7 @@ async function handle(message) {
       result: {
         protocolVersion: "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.3" }
+        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.4" }
       }
     });
     return;

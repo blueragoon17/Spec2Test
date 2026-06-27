@@ -198,7 +198,9 @@ Coding Agent residual evidence is recorded in
 harness is not enough if coverage increased but remains below 100%; residual
 repair must continue up to five generated-artifact edit/replay/remeasure
 attempts per target function unless the remaining gap is classified with
-evidence as max-coverage, infeasible, crash-risk, or toolchain-blocked.
+evidence as max-coverage, infeasible, crash-risk, or toolchain-blocked. When the
+evidence gate passes, the validator normalizes the canonical MCP report and
+removes stale `FINAL_REPORT_BLOCKED.md` markers.
 
 ## Troubleshooting
 
