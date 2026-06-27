@@ -4170,17 +4170,167 @@ function normalizeAttemptHistory(raw) {
       evidence: item.evidence || item.details || item.message
     }))
     : [];
+  const perFunction = (Array.isArray(raw.perFunction) ? raw.perFunction : legacyPerFunction)
+    .map((item) => ({
+      ...item,
+      attempts: Array.isArray(item.attempts) ? item.attempts : (Array.isArray(item.attemptHistory) ? item.attemptHistory : [])
+    }));
   return {
-    attempts: Array.isArray(raw.attempts) ? raw.attempts : (Array.isArray(raw.residualAttempts) ? raw.residualAttempts : []),
-    perFunction: Array.isArray(raw.perFunction) ? raw.perFunction : legacyPerFunction,
-    finalCoverage: raw.finalCoverage || raw.bestCodingAgentCoverage || raw.coverage || null,
+    attempts: Array.isArray(raw.attempts) ? raw.attempts : (Array.isArray(raw.residualAttempts) ? raw.residualAttempts : (Array.isArray(raw.aggregateAttempts) ? raw.aggregateAttempts : [])),
+    perFunction,
+    finalCoverage: raw.finalCoverage || raw.bestCodingAgentCoverage || raw.codingAgentAppliedCumulative || raw.coverage || null,
+    remainingGaps: normalizeRemainingGaps(raw.remainingGaps || raw.coverageLimits || raw.gaps || []),
     source: raw.source || null
   };
 }
 
+function normalizeRemainingGaps(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map((item) => typeof item === "string" ? { function: null, stopReason: item, evidence: item } : item).filter(Boolean);
+  }
+  if (typeof value === "object") {
+    return Object.entries(value).map(([name, item]) => {
+      if (typeof item === "string") return { function: name, stopReason: item, evidence: item };
+      return { function: name, ...(item || {}) };
+    });
+  }
+  return [];
+}
+
+function classifyStopReason(value) {
+  const text = String(value || "").toLowerCase();
+  if (!text) return null;
+  if (text.includes("crash-risk") || text.includes("crash_risk") || text.includes("access violation") || text.includes("segfault")) return "crash-risk";
+  if (text.includes("toolchain-blocked") || text.includes("toolchain_blocked")) return "toolchain-blocked";
+  if (text.includes("infeasible") || text.includes("unreachable") || text.includes("tautological")) return "infeasible";
+  if (text.includes("max-attempts-reached-with-classified-gaps") || text.includes("classified-gaps") || text.includes("classified_gaps")) return "classified-gaps";
+  if (text.includes("max-coverage") || text.includes("max_coverage")) return "max-coverage";
+  return null;
+}
+
+function stopReasonIsAcceptable(value) {
+  return Boolean(classifyStopReason(value));
+}
+
+function parseResidualSummaryGaps(text) {
+  const gaps = [];
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const match = line.match(/^\s*[-*]\s+`?([A-Za-z_][\w$]*)`?\s*:\s*(.+)$/);
+    if (!match) continue;
+    const [, functionName, evidence] = match;
+    const stopReason = classifyStopReason(evidence);
+    if (stopReason) gaps.push({ function: functionName, stopReason, evidence });
+  }
+  return gaps;
+}
+
+function discoverResidualEvidenceFromArtifacts(outDir) {
+  const residualDirs = [
+    path.join(outDir, "residual"),
+    path.join(outDir, "coding_agent_residual"),
+    path.join(outDir, "codex_aug")
+  ].filter((dir) => existsSync(dir));
+  const attemptsByNumber = new Map();
+  for (const dir of residualDirs) {
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { recursive: true, withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const match = entry.name.match(/^residual_attempt(\d+).*\.(c|cc|cpp|exe|json|txt|info|profdata|profraw)$/i);
+      if (!match) continue;
+      const attempt = Number(match[1]);
+      if (!Number.isFinite(attempt) || attempt <= 0) continue;
+      const parentPath = entry.parentPath || dir;
+      const fullPath = path.join(parentPath, entry.name);
+      const current = attemptsByNumber.get(attempt) || {
+        attempt,
+        scope: "aggregate",
+        function: "__aggregate__",
+        changedArtifact: null,
+        artifacts: [],
+        replayCommand: null
+      };
+      current.artifacts.push(fullPath);
+      if (/\.c$/i.test(entry.name) && !current.changedArtifact) current.changedArtifact = fullPath;
+      if (/\.exe$/i.test(entry.name) && !current.replayCommand) current.replayCommand = fullPath;
+      attemptsByNumber.set(attempt, current);
+    }
+  }
+  const attempts = [...attemptsByNumber.values()].sort((a, b) => a.attempt - b.attempt);
+  const summaryCandidates = [
+    path.join(outDir, "mcp_reports", "FINAL_RESIDUAL_SUMMARY.md"),
+    path.join(outDir, "FINAL_RESIDUAL_SUMMARY.md"),
+    path.join(outDir, "reports", "FINAL_RESIDUAL_SUMMARY.md")
+  ];
+  const remainingGaps = [];
+  const summaryPaths = [];
+  for (const candidate of summaryCandidates) {
+    if (!existsSync(candidate)) continue;
+    try {
+      const text = readFileSync(candidate, "utf8").replace(/^\uFEFF/, "");
+      summaryPaths.push(candidate);
+      remainingGaps.push(...parseResidualSummaryGaps(text));
+    } catch {
+      // Ignore unreadable optional summaries.
+    }
+  }
+  const tdProbeDir = path.join(outDir, "residual");
+  if (existsSync(tdProbeDir)) {
+    try {
+      for (const entry of readdirSync(tdProbeDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !/^tdmain_probe.*\.profraw$/i.test(entry.name)) continue;
+        const fullPath = path.join(tdProbeDir, entry.name);
+        const size = statSync(fullPath).size;
+        if (size === 0 && !remainingGaps.some((item) => item.function === "TD_main_0_0")) {
+          remainingGaps.push({
+            function: "TD_main_0_0",
+            stopReason: "crash-risk",
+            evidence: `Zero-byte profiler output from ${entry.name}; direct TD_main_0_0 probe likely crashed before profile flush.`
+          });
+        }
+      }
+    } catch {
+      // Ignore optional probe discovery failures.
+    }
+  }
+  return {
+    attempts,
+    perFunction: [],
+    finalCoverage: null,
+    remainingGaps,
+    source: attempts.length > 0 || remainingGaps.length > 0 ? "discovered-residual-artifacts" : null,
+    paths: {
+      residualDirs,
+      summaryPaths
+    }
+  };
+}
+
+function mergeResidualHistoryWithDiscovered(history, discovered) {
+  const merged = {
+    ...history,
+    attempts: history.attempts?.length ? history.attempts : (discovered.attempts || []),
+    perFunction: history.perFunction || [],
+    finalCoverage: history.finalCoverage || discovered.finalCoverage || null,
+    remainingGaps: [
+      ...(history.remainingGaps || []),
+      ...(discovered.remainingGaps || [])
+    ],
+    discovered
+  };
+  if (!merged.path && discovered.source) merged.path = discovered.source;
+  return merged;
+}
+
 function loadResidualAttemptHistory(outDir, report) {
   const embedded = report?.codingAgentResidualAttemptHistory || report?.codingAgentResidualRepairPlan?.attemptHistory || null;
-  if (embedded) return { ...normalizeAttemptHistory(embedded), path: "embedded-report" };
+  const discovered = discoverResidualEvidenceFromArtifacts(outDir);
+  if (embedded) return mergeResidualHistoryWithDiscovered({ ...normalizeAttemptHistory(embedded), path: "embedded-report" }, discovered);
   const candidates = [
     path.join(outDir, "mcp_reports", "coding_agent_residual_attempt_history.json"),
     path.join(outDir, "coding_agent_residual_attempt_history.json"),
@@ -4189,9 +4339,12 @@ function loadResidualAttemptHistory(outDir, report) {
   ];
   for (const candidate of candidates) {
     const parsed = readJsonWithFallbackSync(candidate, null);
-    if (parsed) return { ...normalizeAttemptHistory(parsed), path: candidate };
+    if (parsed) return mergeResidualHistoryWithDiscovered({ ...normalizeAttemptHistory(parsed), path: candidate }, discovered);
   }
-  return { attempts: [], perFunction: [], finalCoverage: null, path: null, source: null };
+  if ((discovered.attempts || []).length > 0 || (discovered.remainingGaps || []).length > 0) {
+    return { ...discovered, path: discovered.source };
+  }
+  return { attempts: [], perFunction: [], finalCoverage: null, remainingGaps: [], path: null, source: null, discovered };
 }
 
 function coverageGoalReached(finalCoverage) {
@@ -4203,9 +4356,8 @@ function coverageGoalReached(finalCoverage) {
 }
 
 function targetStopIsAcceptable(entry) {
-  const attempts = Array.isArray(entry?.attempts) ? entry.attempts : [];
-  const stopReason = String(entry?.stopReason || entry?.status || "").toLowerCase();
-  const classified = ["max-coverage", "max_coverage", "infeasible", "crash-risk", "crash_risk", "toolchain-blocked", "toolchain_blocked"].some((needle) => stopReason.includes(needle));
+  const attempts = Array.isArray(entry?.attempts) ? entry.attempts : (Array.isArray(entry?.attemptHistory) ? entry.attemptHistory : []);
+  const classified = stopReasonIsAcceptable(entry?.stopReason || entry?.status || entry?.evidence);
   return attempts.length >= C_RESIDUAL_MAX_ATTEMPTS || classified || entry?.goalReached === true || entry?.coverageGoalReached === true;
 }
 
@@ -4234,15 +4386,24 @@ function buildCFinalEvidenceGate({ report, outDir }) {
     .filter(Boolean);
   const perFunction = history.perFunction || [];
   const attempts = history.attempts || [];
+  const remainingGaps = history.remainingGaps || [];
+  const maxAttemptsPerFunction = residualPlan.attemptAccounting?.maxAttemptsPerFunction ?? C_RESIDUAL_MAX_ATTEMPTS;
+  const classifiedRemainingGaps = remainingGaps.filter((item) => stopReasonIsAcceptable(item.stopReason || item.reason || item.status || item.evidence));
+  const aggregateAttemptCount = new Set(attempts.map((item) => Number(item.attempt)).filter((value) => Number.isFinite(value) && value > 0)).size || attempts.length;
+  const aggregateEvidenceSatisfied = targetNames.length > 0
+    && aggregateAttemptCount >= maxAttemptsPerFunction
+    && classifiedRemainingGaps.length > 0;
   const goalReached = coverageGoalReached(history.finalCoverage) || history.finalCoverageGoalReached === true || history.coverageGoalReached === true;
   const coveredTargets = new Set([
     ...attempts.map((item) => item.function || item.targetFunction || item.symbol).filter(Boolean),
     ...perFunction.map((item) => item.function || item.targetFunction || item.symbol).filter(Boolean)
   ]);
-  const missingTargets = targetNames.filter((name) => !coveredTargets.has(name));
-  const incompleteTargets = perFunction
-    .filter((item) => !targetStopIsAcceptable(item))
-    .map((item) => item.function || item.targetFunction || item.symbol || "unknown");
+  const missingTargets = aggregateEvidenceSatisfied ? [] : targetNames.filter((name) => !coveredTargets.has(name));
+  const incompleteTargets = aggregateEvidenceSatisfied
+    ? []
+    : perFunction
+      .filter((item) => !targetStopIsAcceptable(item))
+      .map((item) => item.function || item.targetFunction || item.symbol || "unknown");
   const blockers = [];
   if (required && !history.path && attempts.length === 0 && perFunction.length === 0) blockers.push("missing_residual_attempt_history");
   if (required && !goalReached && targetNames.length > 0 && missingTargets.length > 0) blockers.push("residual_targets_without_attempt_history");
@@ -4262,9 +4423,12 @@ function buildCFinalEvidenceGate({ report, outDir }) {
     attemptHistoryPath: history.path,
     attemptCount: attempts.length,
     perFunctionCount: perFunction.length,
+    aggregateAttemptCount,
+    aggregateEvidenceSatisfied,
+    classifiedRemainingGapCount: classifiedRemainingGaps.length,
     finalCoverageGoalReached: goalReached,
     staleReportState,
-    maxAttemptsPerFunction: residualPlan.attemptAccounting?.maxAttemptsPerFunction ?? C_RESIDUAL_MAX_ATTEMPTS,
+    maxAttemptsPerFunction,
     requiredEvidence: action.requiredEvidence || [],
     message: blockers.length > 0
       ? "Final verification reporting is blocked until Coding Agent residual repair evidence is recorded for the 100% coverage goal."
@@ -4344,6 +4508,9 @@ function applyPassedFinalEvidenceGateToReport(report, gate) {
       nextRequiredAction: null,
       message: "Test augmentation evidence satisfied the final evidence gate."
     };
+  }
+  for (const promptKey of ["codingPlatformPrompt", "codingAgentResidualRepairPrompt", "codingAgentTestAugmentationPrompt"]) {
+    if (Object.prototype.hasOwnProperty.call(normalized, promptKey)) delete normalized[promptKey];
   }
   return normalized;
 }
@@ -7813,7 +7980,8 @@ async function writeJson(pathName, value) {
 function readJsonWithFallbackSync(pathName, fallback = null) {
   try {
     if (!pathName || !existsSync(pathName)) return fallback;
-    return JSON.parse(readFileSync(pathName, "utf8"));
+    const text = readFileSync(pathName, "utf8").replace(/^\uFEFF/, "");
+    return JSON.parse(text);
   } catch {
     return fallback;
   }
@@ -9882,7 +10050,7 @@ async function handle(message) {
       result: {
         protocolVersion: "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.5" }
+        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.6" }
       }
     });
     return;

@@ -76,6 +76,9 @@ try {
       targets: [{ function: "target_func", unmetMetrics: ["line"] }],
       attemptAccounting: { maxAttemptsPerFunction: 5 }
     },
+    codingPlatformPrompt: "Coding Agent residual repair is mandatory before the final answer.",
+    codingAgentResidualRepairPrompt: "Coding-agent residual repair is mandatory before the final answer.",
+    codingAgentTestAugmentationPrompt: "Coding Agent test augmentation is required before the final answer.",
     toolchainEnvironment: {
       environment: {
         hostOS: "windows",
@@ -93,7 +96,7 @@ try {
   const blockedPath = path.join(reportDir, "FINAL_REPORT_BLOCKED.md");
   if (!existsSync(blockedPath)) throw new Error("expected blocked marker to exist");
 
-  writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({
+  const historyJson = JSON.stringify({
     schemaVersion: "perfectone.coding-agent-residual-attempt-history.v1",
     bestCodingAgentCoverage: { line: { pct: 95 }, branch: { pct: 90 } },
     residualAttempts: [
@@ -113,7 +116,11 @@ try {
         stopReason: "max-coverage: remaining branch requires infeasible state"
       }
     ]
-  }, null, 2));
+  }, null, 2);
+  writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), Buffer.concat([
+    Buffer.from([0xEF, 0xBB, 0xBF]),
+    Buffer.from(historyJson, "utf8")
+  ]));
 
   const passed = runValidate(3);
   if (passed.status !== "passed") throw new Error(`expected passed, got ${passed.status}: ${JSON.stringify(passed)}`);
@@ -137,6 +144,9 @@ try {
   }
   if (JSON.stringify(rewritten).includes("hostOS")) {
     throw new Error("legacy hostOS key was not sanitized from rewritten report");
+  }
+  if ("codingPlatformPrompt" in rewritten || "codingAgentResidualRepairPrompt" in rewritten || "codingAgentTestAugmentationPrompt" in rewritten) {
+    throw new Error("stale final-blocking prompt fields were not removed after passing final gate");
   }
   const html = readFileSync(path.join(reportDir, "perfectone_mcp_report.html"), "utf8");
   if (!html.includes("Final answer allowed:</strong> yes")) {
