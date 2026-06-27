@@ -14,7 +14,11 @@
     "test:final-gate": "node ./test/final-evidence-gate-smoke.mjs",
     "test:full-orchestration": "node ./test/full-orchestration-smoke.mjs",
     "test:residual-artifacts": "node ./test/residual-artifact-evidence-smoke.mjs",
-    "test:residual-retry": "node ./test/residual-retry-required-smoke.mjs"
+    "test:residual-attempt-evidence": "node ./test/residual-attempt-evidence-smoke.mjs",
+    "test:residual-coverage-goal": "node ./test/residual-coverage-goal-smoke.mjs",
+    "test:residual-perfunction-max": "node ./test/residual-perfunction-max-smoke.mjs",
+    "test:residual-retry": "node ./test/residual-retry-required-smoke.mjs",
+    "test:residual-targets": "node ./test/residual-targets-required-smoke.mjs"
   },
   "engines": {
     "node": ">=18"

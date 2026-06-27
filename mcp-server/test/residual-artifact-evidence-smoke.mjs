@@ -66,6 +66,7 @@ try {
       executionRequired: true,
       targets: [
         { function: "target_func", unmetMetrics: ["branch"] },
+        { function: "target_func2", unmetMetrics: ["line"] },
         { function: "TD_main_0_0", unmetMetrics: ["function"] }
       ],
       attemptAccounting: { maxAttemptsPerFunction: 5 }
@@ -86,21 +87,40 @@ try {
     "",
     "## Remaining Gaps",
     "",
-    "- `target_func`: max-attempts-reached-with-classified-gaps; remaining branch is max-coverage after aggregate attempts.",
-    "- `TD_main_0_0`: crash-risk. Direct probe exits with Windows access violation."
+    "- `target_func`: max-attempts-reached-with-classified-gaps; remaining branch is max-coverage after aggregate attempts."
   ].join("\n"));
 
   const result = runValidate();
   if (!result) throw new Error("missing validation result");
-  if (result.status !== "passed") throw new Error(`expected passed from discovered artifacts, got ${JSON.stringify(result)}`);
-  if (result.attemptHistoryPath !== "discovered-residual-artifacts") {
-    throw new Error(`expected discovered artifact evidence, got ${result.attemptHistoryPath}`);
+  if (result.status !== "blocked") throw new Error(`expected partial target classification to stay blocked, got ${JSON.stringify(result)}`);
+  if (!result.blockers?.includes("residual_targets_without_attempt_history")) {
+    throw new Error(`expected missing target blocker for partial aggregate evidence, got ${JSON.stringify(result)}`);
   }
-  if (result.aggregateEvidenceSatisfied !== true) {
-    throw new Error(`aggregate residual evidence was not accepted: ${JSON.stringify(result)}`);
+  if (result.aggregateEvidenceSatisfied === true) {
+    throw new Error(`partial aggregate evidence must not satisfy all targets: ${JSON.stringify(result)}`);
   }
-  if (result.missingTargets?.length) {
-    throw new Error(`aggregate evidence should satisfy target coverage history without per-function duplication: ${JSON.stringify(result.missingTargets)}`);
+
+  writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
+    "# Residual Summary",
+    "",
+    "## Remaining Gaps",
+    "",
+    "- `target_func`: max-attempts-reached-with-classified-gaps; remaining branch is max-coverage after aggregate attempts.",
+    "- `target_func2`: infeasible. Remaining line requires contradictory input constraints.",
+    "- `TD_main_0_0`: crash-risk. Direct probe exits with Windows access violation."
+  ].join("\n"));
+
+  const passedResult = runValidate();
+  if (!passedResult) throw new Error("missing second validation result");
+  if (passedResult.status !== "passed") throw new Error(`expected passed from fully classified discovered artifacts, got ${JSON.stringify(passedResult)}`);
+  if (passedResult.attemptHistoryPath !== "discovered-residual-artifacts") {
+    throw new Error(`expected discovered artifact evidence, got ${passedResult.attemptHistoryPath}`);
+  }
+  if (passedResult.aggregateEvidenceSatisfied !== true) {
+    throw new Error(`aggregate residual evidence was not accepted: ${JSON.stringify(passedResult)}`);
+  }
+  if (passedResult.missingTargets?.length) {
+    throw new Error(`fully classified aggregate evidence should satisfy target coverage history without per-function duplication: ${JSON.stringify(passedResult.missingTargets)}`);
   }
   const rewritten = JSON.parse(readFileSync(path.join(reportDir, "perfectone_mcp_report.json"), "utf8"));
   if (rewritten.finalAnswerAllowed !== true || rewritten.completionBlocked !== false) {
@@ -118,10 +138,11 @@ try {
   }
   console.log(JSON.stringify({
     status: "passed",
-    aggregateEvidenceSatisfied: result.aggregateEvidenceSatisfied,
-    attemptCount: result.attemptCount,
-    classifiedRemainingGapCount: result.classifiedRemainingGapCount,
-    finalAnswerAllowed: result.finalAnswerAllowed
+    firstGateStatus: result.status,
+    aggregateEvidenceSatisfied: passedResult.aggregateEvidenceSatisfied,
+    attemptCount: passedResult.attemptCount,
+    classifiedRemainingGapCount: passedResult.classifiedRemainingGapCount,
+    finalAnswerAllowed: passedResult.finalAnswerAllowed
   }, null, 2));
 } finally {
   rmSync(outDir, { recursive: true, force: true });

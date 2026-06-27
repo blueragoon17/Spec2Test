@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
-import { createWriteStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync, unlinkSync } from "node:fs";
+import { createWriteStream, existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -4164,6 +4164,7 @@ function normalizeAttemptHistory(raw) {
   if (Array.isArray(raw)) return { attempts: raw, perFunction: [], finalCoverage: null, source: null };
   const legacyPerFunction = Array.isArray(raw.perFunctionStopReasons)
     ? raw.perFunctionStopReasons.map((item) => ({
+      ...item,
       function: item.function || item.targetFunction || item.symbol,
       attempts: item.attempts || item.attemptHistory || [],
       stopReason: item.stopReason || item.reason || item.status,
@@ -4225,6 +4226,29 @@ function parseResidualSummaryGaps(text) {
   return gaps;
 }
 
+function listFilesRecursive(rootDir) {
+  const files = [];
+  const stack = [rootDir];
+  while (stack.length > 0) {
+    const currentDir = stack.pop();
+    let entries = [];
+    try {
+      entries = readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+      } else if (entry.isFile()) {
+        files.push({ name: entry.name, fullPath });
+      }
+    }
+  }
+  return files;
+}
+
 function discoverResidualEvidenceFromArtifacts(outDir) {
   const residualDirs = [
     path.join(outDir, "residual"),
@@ -4233,20 +4257,12 @@ function discoverResidualEvidenceFromArtifacts(outDir) {
   ].filter((dir) => existsSync(dir));
   const attemptsByNumber = new Map();
   for (const dir of residualDirs) {
-    let entries = [];
-    try {
-      entries = readdirSync(dir, { recursive: true, withFileTypes: true });
-    } catch {
-      entries = [];
-    }
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
+    for (const entry of listFilesRecursive(dir)) {
       const match = entry.name.match(/^(?:residual_)?attempt(\d+).*\.(c|cc|cpp|exe|json|txt|info|profdata|profraw|log)$/i);
       if (!match) continue;
       const attempt = Number(match[1]);
       if (!Number.isFinite(attempt) || attempt <= 0) continue;
-      const parentPath = entry.parentPath || dir;
-      const fullPath = path.join(parentPath, entry.name);
+      const fullPath = entry.fullPath;
       const current = attemptsByNumber.get(attempt) || {
         attempt,
         scope: "aggregate",
@@ -4341,7 +4357,10 @@ function discoverResidualEvidenceFromArtifacts(outDir) {
 function mergeResidualHistoryWithDiscovered(history, discovered) {
   const merged = {
     ...history,
-    attempts: history.attempts?.length ? history.attempts : (discovered.attempts || []),
+    attempts: [
+      ...(history.attempts || []),
+      ...(discovered.attempts || [])
+    ],
     perFunction: history.perFunction || [],
     finalCoverage: history.finalCoverage || discovered.finalCoverage || null,
     remainingGaps: [
@@ -4376,16 +4395,177 @@ function loadResidualAttemptHistory(outDir, report) {
 
 function coverageGoalReached(finalCoverage) {
   if (!finalCoverage || typeof finalCoverage !== "object") return false;
-  const values = ["line", "branch", "function", "mcdc"]
-    .map((key) => finalCoverage[key]?.pct ?? finalCoverage[key])
-    .filter((value) => typeof value === "number");
-  return values.length > 0 && values.every((value) => value >= C_COVERAGE_GOAL_PERCENT);
+  const metricPercent = (metric) => {
+    if (typeof metric === "number") return metric;
+    if (typeof metric === "string") {
+      const parsed = Number(metric.replace(/%$/, ""));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (!metric || typeof metric !== "object") return null;
+    const direct = metric.pct ?? metric.percent ?? metric.percentage;
+    if (typeof direct === "number") return direct;
+    if (typeof direct === "string") {
+      const parsed = Number(direct.replace(/%$/, ""));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    const covered = metric.covered ?? metric.hit ?? metric.hits ?? metric.executed ?? metric.taken;
+    const total = metric.total ?? metric.count;
+    if (typeof covered === "number" && typeof total === "number" && total > 0 && covered >= 0 && covered <= total) return (covered / total) * 100;
+    return null;
+  };
+  const metricReached = (metric, allowZeroTotal = false) => {
+    const pct = metricPercent(metric);
+    if (typeof pct === "number") return pct >= C_COVERAGE_GOAL_PERCENT;
+    const total = metric?.total ?? metric?.count;
+    const covered = metric?.covered ?? metric?.hit ?? metric?.hits ?? metric?.executed ?? metric?.taken;
+    return allowZeroTotal && typeof total === "number" && total === 0 && (covered === undefined || covered === 0);
+  };
+  const lineMetric = finalCoverage.line ?? finalCoverage.lines;
+  const functionMetric = finalCoverage.function ?? finalCoverage.functions;
+  const branchMetric = finalCoverage.branch ?? finalCoverage.branches;
+  const branchExecutedMetric = finalCoverage.branchExecuted;
+  const branchTakenMetric = finalCoverage.branchTaken;
+  const branchReached = branchMetric !== undefined && branchMetric !== null
+    ? metricReached(branchMetric, true)
+    : ((branchExecutedMetric !== undefined || branchTakenMetric !== undefined)
+      && metricReached(branchExecutedMetric, true)
+      && metricReached(branchTakenMetric, true));
+  const mcdcMetric = finalCoverage.mcdc ?? finalCoverage.mcDc ?? finalCoverage.mc_dc;
+  return metricReached(lineMetric, false)
+    && branchReached
+    && metricReached(functionMetric, false)
+    && metricReached(mcdcMetric, true);
 }
 
-function targetStopIsAcceptable(entry) {
+function evidencePathCandidates(value, outDir) {
+  if (!value || typeof value !== "string") return [];
+  let normalized = value;
+  if (/^file:/i.test(value)) {
+    try {
+      normalized = fileURLToPath(value);
+    } catch {
+      normalized = value.replace(/^file:\/\//i, "");
+    }
+  }
+  const insideOutDir = (candidate) => {
+    if (!outDir) return true;
+    const relative = path.relative(path.resolve(outDir), path.resolve(candidate));
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  };
+  if (path.isAbsolute(normalized)) {
+    return insideOutDir(normalized) ? [normalized] : [];
+  }
+  if (!outDir) return [normalized];
+  return [
+    path.join(outDir, normalized),
+    path.join(outDir, "mcp_reports", normalized),
+    path.join(outDir, "residual", normalized),
+    path.join(outDir, "coding_agent_residual", normalized),
+    path.join(outDir, "codex_aug", normalized)
+  ].filter(insideOutDir);
+}
+
+function evidencePathExists(value, outDir) {
+  return evidencePathCandidates(value, outDir).some((candidate) => artifactHasContent(candidate) && artifactRealPathInside(candidate, outDir));
+}
+
+function residualActionEvidencePathExists(value, outDir = null) {
+  if (typeof value !== "string") return false;
+  const name = path.basename(value).toLowerCase();
+  const nonActionEvidence = /(?:report|summary|coverage|aggregate)/i.test(name);
+  const actionNamed = /(?:residual|attempt|harness|fixture|testcase|input|replay|native_run|asan|ubsan|crash|diagnostic)/i.test(name);
+  const looksLikeGeneratedInput = actionNamed && !nonActionEvidence && /\.(?:c|cc|cpp|exe|log|txt)$/i.test(name);
+  return looksLikeGeneratedInput && evidencePathExists(value, outDir);
+}
+
+function residualAttemptHasEvidence(attempt, outDir = null) {
+  if (!attempt || typeof attempt !== "object") return false;
+  const directPaths = [
+    attempt.changedArtifact,
+    attempt.replayCommand,
+    attempt.logPath
+  ].filter((value) => typeof value === "string");
+  if (directPaths.some((value) => residualActionEvidencePathExists(value, outDir))) return true;
+  const artifactPaths = (Array.isArray(attempt.artifacts) ? attempt.artifacts : []).filter((value) => typeof value === "string");
+  if (artifactPaths.some((value) => residualActionEvidencePathExists(value, outDir))) return true;
+  return false;
+}
+
+function residualAttemptHasMeasurementEvidence(attempt, outDir = null) {
+  if (!attempt || typeof attempt !== "object") return false;
+  const explicitPaths = [
+    attempt.measurementArtifact,
+    attempt.coverageArtifact,
+    attempt.reportPath,
+    attempt.logPath,
+    ...(Array.isArray(attempt.artifacts) ? attempt.artifacts : [])
+  ].filter((value) => typeof value === "string");
+  if (explicitPaths.some((value) => {
+    const name = path.basename(value).toLowerCase();
+    return /(?:_llvm\.json|\.info|\.profdata|\.profraw|_report\.txt|_show\.txt|coverage.*\.json)$/i.test(name) && evidencePathExists(value, outDir);
+  })) return true;
+  return false;
+}
+
+function artifactHasContent(artifactPath) {
+  try {
+    const stat = statSync(artifactPath);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}
+
+function artifactRealPathInside(artifactPath, outDir) {
+  if (!outDir) return true;
+  try {
+    const realArtifact = realpathSync(artifactPath);
+    const realOutDir = realpathSync(outDir);
+    const relative = path.relative(realOutDir, realArtifact);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  } catch {
+    return false;
+  }
+}
+
+function residualAttemptSequenceComplete(attempts, maxAttempts = C_RESIDUAL_MAX_ATTEMPTS) {
+  const numbers = new Set((attempts || []).map((item) => Number(item?.attempt)).filter((value) => Number.isFinite(value) && value > 0));
+  return Array.from({ length: maxAttempts }, (_, index) => index + 1).every((attempt) => numbers.has(attempt));
+}
+
+function residualAttemptEvidenceComplete(attempts, maxAttempts = C_RESIDUAL_MAX_ATTEMPTS, outDir = null) {
+  return Array.from({ length: maxAttempts }, (_, index) => index + 1).every((attemptNumber) => {
+    const matchingAttempts = (attempts || []).filter((item) => Number(item?.attempt) === attemptNumber);
+    return matchingAttempts.some((attempt) => residualAttemptHasEvidence(attempt, outDir) && residualAttemptHasMeasurementEvidence(attempt, outDir));
+  });
+}
+
+function normalizeResidualMaxAttempts(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : C_RESIDUAL_MAX_ATTEMPTS;
+}
+
+function residualTargetName(item) {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object") return null;
+  return item.function || item.targetFunction || item.symbol || item.name || item.target || null;
+}
+
+function targetStopIsAcceptable(entry, maxAttempts = C_RESIDUAL_MAX_ATTEMPTS, outDir = null) {
   const attempts = Array.isArray(entry?.attempts) ? entry.attempts : (Array.isArray(entry?.attemptHistory) ? entry.attemptHistory : []);
   const classified = stopReasonIsAcceptable(entry?.stopReason || entry?.status || entry?.evidence);
-  return attempts.length >= C_RESIDUAL_MAX_ATTEMPTS || classified || entry?.goalReached === true || entry?.coverageGoalReached === true;
+  const hasAttemptEvidence = attempts.some((attempt) => residualAttemptHasEvidence(attempt, outDir));
+  const hasAttemptMeasurementEvidence = attempts.some((attempt) => residualAttemptHasMeasurementEvidence(attempt, outDir));
+  const hasEntryEvidencePath = [
+    entry?.evidencePath,
+    entry?.logPath,
+    entry?.artifactPath,
+    entry?.changedArtifact
+  ].some((value) => residualActionEvidencePathExists(value, outDir));
+  return classified
+    ? (hasAttemptEvidence || hasEntryEvidencePath)
+    : ((entry?.goalReached === true || entry?.coverageGoalReached === true) && hasAttemptEvidence && hasAttemptMeasurementEvidence)
+      || (attempts.length >= maxAttempts && residualAttemptSequenceComplete(attempts, maxAttempts) && residualAttemptEvidenceComplete(attempts, maxAttempts, outDir));
 }
 
 function clearFinalBlockingAction(action, message) {
@@ -4406,35 +4586,68 @@ function clearFinalBlockingAction(action, message) {
 function buildCFinalEvidenceGate({ report, outDir }) {
   const action = report?.actionRequired || report?.codingAgentResidualActionRequired || {};
   const residualPlan = report?.codingAgentResidualRepairPlan || {};
-  const required = Boolean(action.required || residualPlan.executionRequired || report?.completionBlocked || report?.finalAnswerAllowed === false);
   const history = loadResidualAttemptHistory(outDir, report);
+  const reportFinalCoverage = report?.finalCoverage
+    || report?.coverage
+    || report?.coverageSummary
+    || report?.residualCoverage?.finalCoverage
+    || null;
+  const measuredFinalCoverage = history.finalCoverage || reportFinalCoverage;
+  const rawGoalReached = coverageGoalReached(measuredFinalCoverage);
+  const residualEvidenceRequired = Boolean(action.required || residualPlan.executionRequired || report?.completionBlocked || report?.finalAnswerAllowed === false);
+  const required = residualEvidenceRequired || !rawGoalReached;
   const targetNames = (residualPlan.targets || report?.residualTargets || [])
-    .map((item) => item.function || item.symbol)
+    .map(residualTargetName)
     .filter(Boolean);
   const perFunction = history.perFunction || [];
   const attempts = history.attempts || [];
   const remainingGaps = history.remainingGaps || [];
-  const maxAttemptsPerFunction = residualPlan.attemptAccounting?.maxAttemptsPerFunction ?? C_RESIDUAL_MAX_ATTEMPTS;
+  const maxAttemptsPerFunction = normalizeResidualMaxAttempts(residualPlan.attemptAccounting?.maxAttemptsPerFunction);
   const classifiedRemainingGaps = remainingGaps.filter((item) => stopReasonIsAcceptable(item.stopReason || item.reason || item.status || item.evidence));
-  const aggregateAttemptCount = new Set(attempts.map((item) => Number(item.attempt)).filter((value) => Number.isFinite(value) && value > 0)).size || attempts.length;
+  const classifiedTargetNames = new Set(classifiedRemainingGaps
+    .map(residualTargetName)
+    .filter(Boolean));
+  const aggregateAttemptNumbers = new Set(attempts.map((item) => Number(item.attempt)).filter((value) => Number.isFinite(value) && value > 0));
+  const aggregateAttemptCount = aggregateAttemptNumbers.size || attempts.length;
+  const aggregateAttemptSequenceComplete = Array.from({ length: maxAttemptsPerFunction }, (_, index) => index + 1)
+    .every((attempt) => aggregateAttemptNumbers.has(attempt));
+  const aggregateAttemptEvidenceComplete = residualAttemptEvidenceComplete(attempts, maxAttemptsPerFunction, outDir);
+  const hasResidualAttemptEvidence = attempts.some((attempt) => residualAttemptHasEvidence(attempt, outDir));
+  const hasResidualMeasurementEvidence = attempts.some((attempt) => residualAttemptHasMeasurementEvidence(attempt, outDir));
+  const hasPerFunctionEvidence = perFunction.some((entry) => targetStopIsAcceptable(entry, maxAttemptsPerFunction, outDir));
+  const finalCoverageEvidenceComplete = rawGoalReached && (!residualEvidenceRequired || (hasResidualAttemptEvidence && hasResidualMeasurementEvidence) || hasPerFunctionEvidence);
+  const goalReached = rawGoalReached && finalCoverageEvidenceComplete;
+  const allTargetsClassified = targetNames.length > 0 && targetNames.every((name) => classifiedTargetNames.has(name));
   const aggregateEvidenceSatisfied = targetNames.length > 0
     && aggregateAttemptCount >= maxAttemptsPerFunction
-    && classifiedRemainingGaps.length > 0;
-  const goalReached = coverageGoalReached(history.finalCoverage) || history.finalCoverageGoalReached === true || history.coverageGoalReached === true;
+    && aggregateAttemptSequenceComplete
+    && aggregateAttemptEvidenceComplete
+    && allTargetsClassified;
   const coveredTargets = new Set([
-    ...attempts.map((item) => item.function || item.targetFunction || item.symbol).filter(Boolean),
-    ...perFunction.map((item) => item.function || item.targetFunction || item.symbol).filter(Boolean)
+    ...attempts.map(residualTargetName).filter(Boolean),
+    ...perFunction.map(residualTargetName).filter(Boolean),
+    ...classifiedTargetNames
   ]);
   const missingTargets = aggregateEvidenceSatisfied ? [] : targetNames.filter((name) => !coveredTargets.has(name));
   const incompleteTargets = aggregateEvidenceSatisfied
     ? []
     : perFunction
-      .filter((item) => !targetStopIsAcceptable(item))
-      .map((item) => item.function || item.targetFunction || item.symbol || "unknown");
+      .filter((item) => !targetStopIsAcceptable(item, maxAttemptsPerFunction, outDir))
+      .map((item) => residualTargetName(item) || "unknown");
   const blockers = [];
   if (required && !history.path && attempts.length === 0 && perFunction.length === 0) blockers.push("missing_residual_attempt_history");
-  if (required && !goalReached && !aggregateEvidenceSatisfied && aggregateAttemptCount > 0 && aggregateAttemptCount < maxAttemptsPerFunction && perFunction.length === 0) {
+  if (required && !goalReached && targetNames.length === 0) blockers.push("residual_targets_missing");
+  if (required && !goalReached && !aggregateEvidenceSatisfied && aggregateAttemptCount < maxAttemptsPerFunction && perFunction.length === 0) {
     blockers.push("aggregate_residual_attempts_below_required");
+  }
+  if (required && !goalReached && aggregateAttemptCount >= maxAttemptsPerFunction && !aggregateAttemptSequenceComplete && perFunction.length === 0) {
+    blockers.push("aggregate_residual_attempt_sequence_incomplete");
+  }
+  if (required && !goalReached && aggregateAttemptSequenceComplete && !aggregateAttemptEvidenceComplete && perFunction.length === 0) {
+    blockers.push("aggregate_residual_attempt_evidence_incomplete");
+  }
+  if (required && rawGoalReached && !finalCoverageEvidenceComplete) {
+    blockers.push("final_coverage_evidence_missing");
   }
   if (required && !goalReached && targetNames.length > 0 && missingTargets.length > 0) blockers.push("residual_targets_without_attempt_history");
   if (required && !goalReached && incompleteTargets.length > 0) blockers.push("residual_targets_without_max_attempt_or_stop_reason");
@@ -4454,9 +4667,16 @@ function buildCFinalEvidenceGate({ report, outDir }) {
     attemptCount: attempts.length,
     perFunctionCount: perFunction.length,
     aggregateAttemptCount,
+    aggregateAttemptSequenceComplete,
+    aggregateAttemptEvidenceComplete,
     aggregateEvidenceSatisfied,
     classifiedRemainingGapCount: classifiedRemainingGaps.length,
     finalCoverageGoalReached: goalReached,
+    rawFinalCoverageGoalReached: rawGoalReached,
+    finalCoverageEvidenceComplete,
+    hasResidualAttemptEvidence,
+    hasResidualMeasurementEvidence,
+    hasPerFunctionEvidence,
     staleReportState,
     maxAttemptsPerFunction,
     requiredEvidence: action.requiredEvidence || [],

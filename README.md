@@ -202,6 +202,21 @@ evidence as max-coverage, infeasible, crash-risk, or toolchain-blocked. When the
 evidence gate passes, the validator normalizes the canonical MCP report and
 removes stale `FINAL_REPORT_BLOCKED.md` markers.
 
+## Output Disclaimer
+
+Spec2Test and PerfectOne-generated outputs are beta verification assistance
+artifacts, not certified proof of product correctness, safety, security, or
+standards compliance. Generated tests, assertions, reports, coverage numbers,
+UB/ASAN interpretations, and recommendations must be reviewed and approved by
+the user before use.
+
+The repository owner and tool author do not take responsibility or liability
+for decisions, defects, losses, certification claims, safety claims, compliance
+claims, or production releases based on this tool's outputs. You are
+responsible for validating the generated artifacts against your own source
+code, requirements, target platform, toolchain, and applicable engineering
+process.
+
 ## Troubleshooting
 
 - `dockerDesktopLinuxEngine` pipe missing: Docker Desktop is mandatory. Start

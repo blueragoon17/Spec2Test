@@ -7,7 +7,9 @@ import { spawnSync } from "node:child_process";
 const root = path.resolve(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const outDir = mkdtempSync(path.join(os.tmpdir(), "perfectone-final-gate-"));
 const reportDir = path.join(outDir, "mcp_reports");
+const residualDir = path.join(outDir, "residual");
 mkdirSync(reportDir, { recursive: true });
+mkdirSync(residualDir, { recursive: true });
 
 function runValidate(id = 2) {
   const messages = [
@@ -112,11 +114,13 @@ try {
     perFunctionStopReasons: [
       {
         function: "target_func",
-        attempts: [{ attempt: 1 }],
+        attempts: [{ attempt: 1, changedArtifact: "residual_attempt1.c", reportPath: "residual_attempt1_report.txt" }],
         stopReason: "max-coverage: remaining branch requires infeasible state"
       }
     ]
   }, null, 2);
+  writeFileSync(path.join(residualDir, "residual_attempt1.c"), "/* generated residual attempt */\n");
+  writeFileSync(path.join(residualDir, "residual_attempt1_report.txt"), "residual coverage report\n");
   writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), Buffer.concat([
     Buffer.from([0xEF, 0xBB, 0xBF]),
     Buffer.from(historyJson, "utf8")
