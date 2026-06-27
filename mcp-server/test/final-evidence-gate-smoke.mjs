@@ -53,7 +53,7 @@ try {
       finalAnswerAllowed: false,
       nextRequiredAction: "execute_coding_agent_residual_repair_loop",
       targetCount: 1,
-      maxAttemptsPerFunction: 5,
+      maxAttemptsPerFunction: 10,
       requiredEvidence: ["changed generated harness", "before coverage", "after coverage"]
     },
     codingAgentResidualActionRequired: {
@@ -76,7 +76,7 @@ try {
     codingAgentResidualRepairPlan: {
       executionRequired: true,
       targets: [{ function: "target_func", unmetMetrics: ["line"] }],
-      attemptAccounting: { maxAttemptsPerFunction: 5 },
+      attemptAccounting: { maxAttemptsPerFunction: 10 },
       attemptHistory: "embedded-report"
     },
     codingPlatformPrompt: "Coding Agent residual repair is mandatory before the final answer.",
@@ -100,10 +100,10 @@ try {
   if (!existsSync(blockedPath)) throw new Error("expected blocked marker to exist");
 
   const aggregateAttempts = [
-    { attempt: 1, changedArtifact: "residual_attempt1.c", reportPath: "residual_attempt1_report.txt", afterCoverage: { line: 90, branch: 80, function: 95, mcdc: 50 } },
-    { attempt: 2, changedArtifact: "residual_attempt2.c", reportPath: "residual_attempt2_report.txt", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } },
-    { attempt: 3, changedArtifact: "residual_attempt3.c", reportPath: "residual_attempt3_report.txt", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } },
-    { attempt: 4, changedArtifact: "residual_attempt4.c", reportPath: "residual_attempt4_report.txt", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } }
+    { attempt: 1, changedArtifact: "residual_attempt1.c", coverageArtifact: "residual_attempt1_llvm.json", afterCoverage: { line: 90, branch: 80, function: 95, mcdc: 50 } },
+    { attempt: 2, changedArtifact: "residual_attempt2.c", coverageArtifact: "residual_attempt2_llvm.json", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } },
+    { attempt: 3, changedArtifact: "residual_attempt3.c", coverageArtifact: "residual_attempt3_llvm.json", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } },
+    { attempt: 4, changedArtifact: "residual_attempt4.c", coverageArtifact: "residual_attempt4_llvm.json", afterCoverage: { line: 95, branch: 84, function: 95, mcdc: 55 } }
   ];
   const historyJson = JSON.stringify({
     schemaVersion: "perfectone.coding-agent-residual-attempt-history.v1",
@@ -119,7 +119,7 @@ try {
   }, null, 2);
   for (const attempt of aggregateAttempts) {
     writeFileSync(path.join(residualDir, attempt.changedArtifact), `/* generated residual attempt ${attempt.attempt} */\n`);
-    writeFileSync(path.join(residualDir, attempt.reportPath), `residual coverage report ${attempt.attempt}\n`);
+    writeFileSync(path.join(residualDir, attempt.coverageArtifact), JSON.stringify({ afterCoverage: attempt.afterCoverage }, null, 2));
   }
   writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), Buffer.concat([
     Buffer.from([0xEF, 0xBB, 0xBF]),

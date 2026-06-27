@@ -3094,7 +3094,7 @@ function sourceTargetsMissingFromFunctionReports(targetFunctionFilter, functionR
   return (targetFunctionFilter?.functions || []).filter((name) => !reported.has(name));
 }
 
-const C_RESIDUAL_MAX_ATTEMPTS = 5;
+const C_RESIDUAL_MAX_ATTEMPTS = 10;
 const C_RESIDUAL_NO_IMPROVEMENT_LIMIT = 2;
 const C_STRUCT_DEPTH_SECURITY_MAX = 5;
 const C_COVERAGE_GOAL_PERCENT = 100;
@@ -4224,11 +4224,19 @@ function normalizeAttemptHistory(raw) {
   if (!raw) return { attempts: [], perFunction: [], finalCoverage: null, source: null };
   if (Array.isArray(raw)) return { attempts: raw, perFunction: [], finalCoverage: null, source: null };
   if (typeof raw !== "object") return { attempts: [], perFunction: [], finalCoverage: null, remainingGaps: [], source: null };
+  const sourceFiles = [
+    raw.sourceFile,
+    raw.targetSourceFile,
+    ...(Array.isArray(raw.sourceFiles) ? raw.sourceFiles : []),
+    ...(Array.isArray(raw.targetSourceFiles) ? raw.targetSourceFiles : [])
+  ].filter((value) => typeof value === "string" && value.trim());
   return {
     attempts: normalizeAttemptList(Array.isArray(raw.attempts) ? raw.attempts : (Array.isArray(raw.residualAttempts) ? raw.residualAttempts : (Array.isArray(raw.aggregateAttempts) ? raw.aggregateAttempts : []))),
     perFunction: normalizePerFunctionAttempts(raw),
     finalCoverage: raw.finalCoverage || raw.bestCodingAgentCoverage || raw.codingAgentAppliedCumulative || raw.coverage || null,
     remainingGaps: normalizeRemainingGaps(raw.remainingGaps || raw.coverageLimits || raw.gaps || []),
+    sourceFile: sourceFiles[0] || null,
+    sourceFiles,
     source: raw.source || null
   };
 }
@@ -4324,7 +4332,7 @@ function discoverResidualEvidenceFromArtifacts(outDir) {
       if (/\.exe$/i.test(entry.name) && !current.replayCommand) current.replayCommand = fullPath;
       if (/_llvm\.json$/i.test(entry.name) || /coverage.*\.json$/i.test(entry.name)) {
         const parsed = readJsonWithFallbackSync(fullPath, null);
-        const parsedCoverage = parsed?.afterCoverage || parsed?.coverage || parsed?.finalCoverage || parsed?.summary || null;
+        const parsedCoverage = coverageFromJsonObject(parsed, fullPath);
         if (parsedCoverage && typeof parsedCoverage === "object" && !current.afterCoverage) current.afterCoverage = parsedCoverage;
       }
       attemptsByNumber.set(attempt, current);
@@ -4408,14 +4416,26 @@ function discoverResidualEvidenceFromArtifacts(outDir) {
 }
 
 function mergeResidualHistoryWithDiscovered(history, discovered) {
+  const historyAttempts = history.attempts || [];
+  const historyAttemptNumbers = new Set(historyAttempts.map((item) => Number(item?.attempt)).filter((value) => Number.isFinite(value) && value > 0));
+  const discoveredAttempts = (discovered.attempts || []).filter((item) => {
+    if (historyAttemptNumbers.size < 1) return true;
+    const number = Number(item?.attempt);
+    return !Number.isFinite(number) || !historyAttemptNumbers.has(number);
+  });
   const merged = {
     ...history,
     attempts: [
-      ...(history.attempts || []),
-      ...(discovered.attempts || [])
+      ...historyAttempts,
+      ...discoveredAttempts
     ],
     perFunction: history.perFunction || [],
     finalCoverage: history.finalCoverage || discovered.finalCoverage || null,
+    sourceFile: history.sourceFile || discovered.sourceFile || null,
+    sourceFiles: [
+      ...(Array.isArray(history.sourceFiles) ? history.sourceFiles : []),
+      ...(Array.isArray(discovered.sourceFiles) ? discovered.sourceFiles : [])
+    ].filter((value, index, values) => typeof value === "string" && values.indexOf(value) === index),
     remainingGaps: [
       ...(history.remainingGaps || []),
       ...(discovered.remainingGaps || [])
@@ -4533,6 +4553,200 @@ function coverageImprovementScore(finalCoverage) {
   return metrics.reduce((sum, value) => sum + value, 0) / metrics.length;
 }
 
+function coverageHasNumericMetric(finalCoverage) {
+  return coverageImprovementScore(finalCoverage) !== null;
+}
+
+function readTextFileSyncFlexible(filePath) {
+  const buffer = readFileSync(filePath);
+  if (buffer.length >= 2) {
+    if (buffer[0] === 0xFF && buffer[1] === 0xFE) return buffer.subarray(2).toString("utf16le").replace(/^\uFEFF/, "");
+    if (buffer[0] === 0xFE && buffer[1] === 0xFF) return buffer.subarray(2).swap16().toString("utf16le").replace(/^\uFEFF/, "");
+  }
+  const hasNul = buffer.subarray(0, Math.min(buffer.length, 256)).some((value) => value === 0);
+  if (hasNul) return buffer.toString("utf16le").replace(/^\uFEFF/, "");
+  return buffer.toString("utf8").replace(/^\uFEFF/, "");
+}
+
+function coverageFromLlvmSummary(summary) {
+  if (!summary || typeof summary !== "object") return null;
+  const coverage = {
+    line: summary.line ?? summary.lines,
+    branch: summary.branch ?? summary.branches,
+    function: summary.function ?? summary.functions,
+    mcdc: summary.mcdc ?? summary.mcDc ?? summary.mc_dc
+  };
+  return coverageHasNumericMetric(coverage) ? coverage : null;
+}
+
+function normalizeCoverageSourceKey(filePath) {
+  if (!filePath || typeof filePath !== "string") return "";
+  return path.normalize(filePath).replace(/\\/g, "/").toLowerCase();
+}
+
+function sourceFileKeysForCoverage(options = {}) {
+  return [
+    options.sourceFile,
+    options.targetSourceFile,
+    ...(Array.isArray(options.sourceFiles) ? options.sourceFiles : []),
+    ...(Array.isArray(options.targetSourceFiles) ? options.targetSourceFiles : [])
+  ]
+    .filter((value) => typeof value === "string" && value.trim())
+    .map(normalizeCoverageSourceKey)
+    .filter(Boolean);
+}
+
+function coverageFileMatchesSourceKeys(filename, sourceKeys) {
+  const key = normalizeCoverageSourceKey(filename);
+  if (!key || sourceKeys.length < 1) return false;
+  return sourceKeys.some((sourceKey) => key === sourceKey || key.endsWith(`/${path.basename(sourceKey)}`) || sourceKey.endsWith(`/${path.basename(key)}`));
+}
+
+function coverageFromJsonObject(parsed, artifactPath = null, options = {}) {
+  if (!parsed || typeof parsed !== "object") return null;
+  for (const candidate of [
+    parsed.afterCoverage,
+    parsed.coverage,
+    parsed.finalCoverage,
+    parsed.cumulativeCoverage,
+    parsed.bestCoverage,
+    parsed.measuredCoverage,
+    parsed.summary
+  ]) {
+    if (coverageHasNumericMetric(candidate)) return candidate;
+  }
+  if (Array.isArray(parsed.data)) {
+    const sourceKeys = sourceFileKeysForCoverage(options);
+    const fileEntries = parsed.data.flatMap((item) => Array.isArray(item?.files) ? item.files : []);
+    const withCoverage = fileEntries.filter((item) => coverageHasNumericMetric(coverageFromLlvmSummary(item?.summary)));
+    if (withCoverage.length > 0) {
+      const keyed = withCoverage.find((item) => coverageFileMatchesSourceKeys(item?.filename, sourceKeys));
+      if (keyed) return coverageFromLlvmSummary(keyed.summary);
+      if (sourceKeys.length < 1 && withCoverage.length > 1) {
+        return { __missingTargetSourceFileKey: true };
+      }
+      const sourceLike = withCoverage.find((item) => {
+        const filename = String(item?.filename || "");
+        return /\.(?:c|h)$/i.test(filename)
+          && !/(?:residual|attempt|harness|fixture|codex_aug|coding_agent_residual|mcp_reports|perfectone-output|perfectone_unitverify)/i.test(filename);
+      }) || withCoverage.find((item) => {
+        const filename = String(item?.filename || "");
+        return /\.(?:c|h)$/i.test(filename) && !/(?:residual|attempt|harness|fixture)/i.test(path.basename(filename));
+      });
+      if (sourceLike) return coverageFromLlvmSummary(sourceLike.summary);
+    }
+    for (const item of parsed.data) {
+      const coverage = coverageFromLlvmSummary(item?.totals);
+      if (coverage) return coverage;
+    }
+  }
+  if (artifactPath && /_llvm\.json$/i.test(path.basename(artifactPath))) {
+    return null;
+  }
+  return null;
+}
+
+function coverageArtifactsForAttempt(attempt) {
+  if (!attempt || typeof attempt !== "object") return [];
+  const candidates = [
+    attempt.measurementArtifact,
+    attempt.coverageArtifact,
+    ...(Array.isArray(attempt.artifacts) ? attempt.artifacts : [])
+  ];
+  if (typeof attempt.reportPath === "string" && /\.(?:json|info)$/i.test(attempt.reportPath)) {
+    candidates.push(attempt.reportPath);
+  }
+  return candidates
+    .filter((value) => typeof value === "string" && /\.(?:json|info)$/i.test(value))
+    .filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function parseCoverageArtifactSync(artifactPath, options = {}) {
+  const name = path.basename(String(artifactPath || "")).toLowerCase();
+  try {
+    if (/\.json$/i.test(name)) {
+      const parsed = readJsonWithFallbackSync(artifactPath, null);
+      return coverageFromJsonObject(parsed, artifactPath, options);
+    }
+    if (/\.info$/i.test(name)) {
+      const coverage = parseLcovSummary(readTextFileSyncFlexible(artifactPath));
+      return coverageHasNumericMetric(coverage) ? coverage : null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function measuredCoverageForAttempt(attempt, outDir = null, options = {}) {
+  const declaredCoverage = attemptCoverageObject(attempt);
+  const attemptOptions = {
+    ...options,
+    sourceFile: attempt?.sourceFile || attempt?.targetSourceFile || options.sourceFile,
+    sourceFiles: [
+      ...(Array.isArray(options.sourceFiles) ? options.sourceFiles : []),
+      ...(Array.isArray(attempt?.sourceFiles) ? attempt.sourceFiles : []),
+      ...(Array.isArray(attempt?.targetSourceFiles) ? attempt.targetSourceFiles : [])
+    ]
+  };
+  for (const artifact of coverageArtifactsForAttempt(attempt)) {
+    for (const candidate of evidencePathCandidates(artifact, outDir)) {
+      if (!artifactHasContent(candidate) || !artifactRealPathInside(candidate, outDir)) continue;
+      const measuredCoverage = parseCoverageArtifactSync(candidate, attemptOptions);
+      if (measuredCoverage?.__missingTargetSourceFileKey) {
+        return {
+          coverage: null,
+          artifactPath: candidate,
+          declaredCoverage,
+          mismatch: { reason: "missing_target_source_file_key" }
+        };
+      }
+      if (!coverageHasNumericMetric(measuredCoverage)) continue;
+      const mismatch = declaredCoverage && coverageHasNumericMetric(declaredCoverage)
+        ? coverageSummariesMismatch(declaredCoverage, measuredCoverage)
+        : null;
+      return {
+        coverage: measuredCoverage,
+        artifactPath: candidate,
+        declaredCoverage,
+        mismatch
+      };
+    }
+  }
+  return {
+    coverage: null,
+    artifactPath: null,
+    declaredCoverage,
+    mismatch: declaredCoverage && coverageHasNumericMetric(declaredCoverage)
+      ? { reason: "declared_coverage_without_parseable_artifact" }
+      : null
+  };
+}
+
+function coverageSummariesMismatch(declaredCoverage, measuredCoverage, tolerancePct = 0.2) {
+  const declared = coverageMetricSummary(declaredCoverage);
+  const measured = coverageMetricSummary(measuredCoverage);
+  const mismatches = [];
+  for (const key of ["line", "branch", "function", "mcdc"]) {
+    const expected = declared[key];
+    if (typeof expected !== "number" || !Number.isFinite(expected)) continue;
+    const actual = measured[key];
+    if (typeof actual !== "number" || !Number.isFinite(actual)) {
+      mismatches.push({ metric: key, declared: expected, measured: null });
+      continue;
+    }
+    if (Math.abs(expected - actual) > tolerancePct) {
+      mismatches.push({
+        metric: key,
+        declared: Number(expected.toFixed(4)),
+        measured: Number(actual.toFixed(4)),
+        delta: Number((actual - expected).toFixed(4))
+      });
+    }
+  }
+  return mismatches.length > 0 ? { reason: "declared_coverage_mismatch_with_artifact", mismatches } : null;
+}
+
 function attemptCoverageObject(attempt) {
   if (!attempt || typeof attempt !== "object") return null;
   return attempt.afterCoverage
@@ -4598,7 +4812,7 @@ function residualAttemptHasNumericCoverage(attempt) {
   return coverageImprovementScore(attemptCoverageObject(attempt)) !== null;
 }
 
-function analyzeResidualCoverageProgress(attempts, outDir = null) {
+function analyzeResidualCoverageProgress(attempts, outDir = null, options = {}) {
   const sorted = (attempts || [])
     .map((attempt, index) => ({ attempt, index, number: Number(attempt?.attempt) }))
     .filter(({ attempt }) => attempt && typeof attempt === "object")
@@ -4615,8 +4829,9 @@ function analyzeResidualCoverageProgress(attempts, outDir = null) {
     const attempt = item.attempt;
     const changeKey = repairChangeArtifactKey(attempt, outDir);
     const hasActionEvidence = residualAttemptHasEvidence(attempt, outDir);
-    const hasMeasurementEvidence = residualAttemptHasMeasurementEvidence(attempt, outDir);
-    const coverage = attemptCoverageObject(attempt);
+    const measurement = measuredCoverageForAttempt(attempt, outDir, options);
+    const hasMeasurementEvidence = Boolean(measurement.coverage);
+    const coverage = measurement.coverage;
     const score = coverageImprovementScore(coverage);
     const number = Number.isFinite(item.number) ? item.number : item.index + 1;
     const invalidReasons = [];
@@ -4624,10 +4839,18 @@ function analyzeResidualCoverageProgress(attempts, outDir = null) {
     if (changeKey && seenChangeKeys.has(changeKey)) invalidReasons.push("duplicate_generated_artifact_change_without_snapshot_hash");
     if (!hasActionEvidence) invalidReasons.push("missing_action_evidence");
     if (!hasMeasurementEvidence) invalidReasons.push("missing_measurement_evidence");
+    if (!measurement.artifactPath) invalidReasons.push("missing_parseable_coverage_artifact");
+    if (measurement.mismatch) invalidReasons.push(measurement.mismatch.reason || "declared_coverage_mismatch_with_artifact");
     if (score === null) invalidReasons.push("missing_numeric_after_coverage");
     if (invalidReasons.length > 0) {
       if (changeKey && seenChangeKeys.has(changeKey)) duplicateChangeKeys.add(changeKey);
-      invalidAttempts.push({ attempt: number, changeKey, reasons: invalidReasons });
+      invalidAttempts.push({
+        attempt: number,
+        changeKey,
+        reasons: invalidReasons,
+        measurementArtifact: measurement.artifactPath,
+        coverageMismatch: measurement.mismatch || null
+      });
       continue;
     }
     seenChangeKeys.add(changeKey);
@@ -4636,7 +4859,8 @@ function analyzeResidualCoverageProgress(attempts, outDir = null) {
       changeKey,
       score,
       coverage,
-      metrics: coverageMetricSummary(coverage)
+      metrics: coverageMetricSummary(coverage),
+      measurementArtifact: measurement.artifactPath
     });
   }
   let previous = null;
@@ -4669,6 +4893,7 @@ function analyzeResidualCoverageProgress(attempts, outDir = null) {
   }
   const validAttemptNumbers = validAttempts.map((item) => item.attempt).filter((value) => Number.isInteger(value) && value > 0);
   const maxValidAttemptNumber = validAttemptNumbers.length > 0 ? Math.max(...validAttemptNumbers) : 0;
+  const attemptLimitExceeded = validAttempts.length > C_RESIDUAL_MAX_ATTEMPTS || maxValidAttemptNumber > C_RESIDUAL_MAX_ATTEMPTS;
   const validAttemptSequenceComplete = maxValidAttemptNumber === 0
     || Array.from({ length: maxValidAttemptNumber }, (_item, index) => index + 1).every((attempt) => validAttemptNumbers.includes(attempt));
   return {
@@ -4676,6 +4901,8 @@ function analyzeResidualCoverageProgress(attempts, outDir = null) {
     invalidAttempts,
     duplicateChangeKeyCount: duplicateChangeKeys.size,
     validAttemptCount: validAttempts.length,
+    maxAttemptLimit: C_RESIDUAL_MAX_ATTEMPTS,
+    attemptLimitExceeded,
     consecutiveNoIncrease,
     longestNoIncreaseStreak,
     noIncreaseLimit: 2,
@@ -4743,18 +4970,7 @@ function residualAttemptHasEvidence(attempt, outDir = null) {
 
 function residualAttemptHasMeasurementEvidence(attempt, outDir = null) {
   if (!attempt || typeof attempt !== "object") return false;
-  const explicitPaths = [
-    attempt.measurementArtifact,
-    attempt.coverageArtifact,
-    attempt.reportPath,
-    attempt.logPath,
-    ...(Array.isArray(attempt.artifacts) ? attempt.artifacts : [])
-  ].filter((value) => typeof value === "string");
-  if (explicitPaths.some((value) => {
-    const name = path.basename(value).toLowerCase();
-    return /(?:_llvm\.json|\.info|\.profdata|\.profraw|_report\.txt|_show\.txt|coverage.*\.json)$/i.test(name) && evidencePathExists(value, outDir);
-  })) return true;
-  return false;
+  return Boolean(measuredCoverageForAttempt(attempt, outDir).coverage);
 }
 
 function artifactHasContent(artifactPath) {
@@ -4792,7 +5008,8 @@ function residualAttemptEvidenceComplete(attempts, maxAttempts = C_RESIDUAL_MAX_
 
 function normalizeResidualMaxAttempts(value) {
   const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : C_RESIDUAL_MAX_ATTEMPTS;
+  if (Number.isInteger(parsed) && parsed > C_RESIDUAL_MAX_ATTEMPTS) return C_RESIDUAL_MAX_ATTEMPTS;
+  return C_RESIDUAL_MAX_ATTEMPTS;
 }
 
 function residualTargetName(item) {
@@ -4814,6 +5031,33 @@ function targetStopIsAcceptable(entry, maxAttempts = C_RESIDUAL_MAX_ATTEMPTS, ou
   ].some((value) => residualActionEvidencePathExists(value, outDir));
   return classified
     ? (hasAttemptEvidence || hasEntryEvidencePath)
+    : ((entry?.goalReached === true || entry?.coverageGoalReached === true) && hasAttemptEvidence && hasAttemptMeasurementEvidence);
+}
+
+function attemptsForResidualTargetEntry(entry, aggregateAttempts = []) {
+  const direct = Array.isArray(entry?.attempts) ? entry.attempts : (Array.isArray(entry?.attemptHistory) ? entry.attemptHistory : []);
+  if (direct.length > 0) return direct;
+  const ref = String(entry?.attemptsRef || entry?.attemptHistoryRef || entry?.aggregateAttemptsRef || "").toLowerCase();
+  if (ref === "aggregate" || ref === "aggregateattempts" || ref === "aggregate_attempts") return aggregateAttempts;
+  const refs = Array.isArray(entry?.aggregateAttemptRefs) ? entry.aggregateAttemptRefs : (Array.isArray(entry?.attemptRefs) ? entry.attemptRefs : []);
+  const refNumbers = new Set(refs.map((item) => Number(item)).filter((item) => Number.isFinite(item) && item > 0));
+  if (refNumbers.size > 0) return aggregateAttempts.filter((attempt) => refNumbers.has(Number(attempt?.attempt)));
+  return [];
+}
+
+function targetStopIsAcceptableWithAggregate(entry, maxAttempts = C_RESIDUAL_MAX_ATTEMPTS, outDir = null, aggregateAttempts = [], options = {}) {
+  const attempts = attemptsForResidualTargetEntry(entry, aggregateAttempts);
+  const classified = stopReasonIsAcceptable(entry?.stopReason || entry?.status || entry?.evidence);
+  const hasAttemptEvidence = attempts.some((attempt) => residualAttemptHasEvidence(attempt, outDir));
+  const hasAttemptMeasurementEvidence = attempts.some((attempt) => Boolean(measuredCoverageForAttempt(attempt, outDir, options).coverage));
+  const hasEntryEvidencePath = [
+    entry?.evidencePath,
+    entry?.logPath,
+    entry?.artifactPath,
+    entry?.changedArtifact
+  ].some((value) => residualActionEvidencePathExists(value, outDir));
+  return classified
+    ? ((hasAttemptEvidence && hasAttemptMeasurementEvidence) || hasEntryEvidencePath)
     : ((entry?.goalReached === true || entry?.coverageGoalReached === true) && hasAttemptEvidence && hasAttemptMeasurementEvidence);
 }
 
@@ -4852,6 +5096,15 @@ function buildCFinalEvidenceGate({ report, outDir }) {
   const attempts = history.attempts || [];
   const remainingGaps = history.remainingGaps || [];
   const maxAttemptsPerFunction = normalizeResidualMaxAttempts(residualPlan.attemptAccounting?.maxAttemptsPerFunction);
+  const sourceFilesForMeasurement = [
+    history.sourceFile,
+    ...(Array.isArray(history.sourceFiles) ? history.sourceFiles : []),
+    report?.sourceFile,
+    report?.targetSourceFile,
+    ...(Array.isArray(report?.sourceFiles) ? report.sourceFiles : []),
+    ...(Array.isArray(report?.targetSourceFiles) ? report.targetSourceFiles : []),
+    ...(Array.isArray(report?.cUnitVerificationFlow?.sourceFiles) ? report.cUnitVerificationFlow.sourceFiles : [])
+  ].filter((value, index, values) => typeof value === "string" && value.trim() && values.indexOf(value) === index);
   const classifiedRemainingGaps = remainingGaps.filter((item) => stopReasonIsAcceptable(item.stopReason || item.reason || item.status || item.evidence));
   const classifiedTargetNames = new Set(classifiedRemainingGaps
     .map(residualTargetName)
@@ -4861,14 +5114,19 @@ function buildCFinalEvidenceGate({ report, outDir }) {
   const aggregateAttemptSequenceComplete = Array.from({ length: maxAttemptsPerFunction }, (_, index) => index + 1)
     .every((attempt) => aggregateAttemptNumbers.has(attempt));
   const aggregateAttemptEvidenceComplete = residualAttemptEvidenceComplete(attempts, maxAttemptsPerFunction, outDir);
-  const residualCoverageProgress = analyzeResidualCoverageProgress(attempts, outDir);
-  const coveragePlateauSatisfied = !rawGoalReached && residualCoverageProgress.plateauSatisfied;
+  const residualCoverageProgress = analyzeResidualCoverageProgress(attempts, outDir, { sourceFiles: sourceFilesForMeasurement });
+  const coveragePlateauSatisfied = !rawGoalReached && residualCoverageProgress.plateauSatisfied && !residualCoverageProgress.attemptLimitExceeded;
   const duplicateRepairAttemptEvidence = residualCoverageProgress.invalidAttempts.some((item) =>
     item.reasons.includes("duplicate_generated_artifact_change_without_snapshot_hash")
     && !item.reasons.includes("missing_numeric_after_coverage"));
   const hasResidualAttemptEvidence = attempts.some((attempt) => residualAttemptHasEvidence(attempt, outDir));
   const hasResidualMeasurementEvidence = attempts.some((attempt) => residualAttemptHasMeasurementEvidence(attempt, outDir));
-  const hasPerFunctionEvidence = perFunction.some((entry) => targetStopIsAcceptable(entry, maxAttemptsPerFunction, outDir));
+  const acceptablePerFunctionTargetNames = new Set(perFunction
+    .filter((entry) => targetStopIsAcceptableWithAggregate(entry, maxAttemptsPerFunction, outDir, attempts, { sourceFiles: sourceFilesForMeasurement }))
+    .map(residualTargetName)
+    .filter(Boolean));
+  for (const name of acceptablePerFunctionTargetNames) classifiedTargetNames.add(name);
+  const hasPerFunctionEvidence = acceptablePerFunctionTargetNames.size > 0;
   const finalCoverageEvidenceComplete = rawGoalReached && (!residualEvidenceRequired || (hasResidualAttemptEvidence && hasResidualMeasurementEvidence) || hasPerFunctionEvidence);
   const goalReached = rawGoalReached && finalCoverageEvidenceComplete;
   const allTargetsClassified = targetNames.length > 0 && targetNames.every((name) => classifiedTargetNames.has(name));
@@ -4877,7 +5135,7 @@ function buildCFinalEvidenceGate({ report, outDir }) {
     && aggregateAttemptSequenceComplete
     && aggregateAttemptEvidenceComplete
     && allTargetsClassified;
-  const residualStopSatisfied = goalReached || coveragePlateauSatisfied;
+  const residualStopSatisfied = goalReached || (coveragePlateauSatisfied && (targetNames.length === 0 || allTargetsClassified));
   const coveredTargets = new Set([
     ...attempts.map(residualTargetName).filter(Boolean),
     ...perFunction.map(residualTargetName).filter(Boolean),
@@ -4887,7 +5145,7 @@ function buildCFinalEvidenceGate({ report, outDir }) {
   const incompleteTargets = residualStopSatisfied
     ? []
     : perFunction
-      .filter((item) => !targetStopIsAcceptable(item, maxAttemptsPerFunction, outDir))
+      .filter((item) => !targetStopIsAcceptableWithAggregate(item, maxAttemptsPerFunction, outDir, attempts, { sourceFiles: sourceFilesForMeasurement }))
       .map((item) => residualTargetName(item) || "unknown");
   const blockers = [];
   if (required && !history.path && attempts.length === 0 && perFunction.length === 0) blockers.push("missing_residual_attempt_history");
@@ -4900,6 +5158,9 @@ function buildCFinalEvidenceGate({ report, outDir }) {
   }
   if (required && !goalReached && residualCoverageProgress.validAttemptCount > 0 && !residualCoverageProgress.validAttemptSequenceComplete) {
     blockers.push("residual_repair_attempt_sequence_incomplete");
+  }
+  if (required && !goalReached && residualCoverageProgress.attemptLimitExceeded) {
+    blockers.push("residual_repair_attempt_limit_exceeded");
   }
   if (required && !goalReached && !coveragePlateauSatisfied && residualCoverageProgress.validAttemptCount === 0) {
     blockers.push("coverage_growth_attempts_missing");
@@ -8495,7 +8756,7 @@ async function writeJson(pathName, value) {
 function readJsonWithFallbackSync(pathName, fallback = null) {
   try {
     if (!pathName || !existsSync(pathName)) return fallback;
-    const text = readFileSync(pathName, "utf8").replace(/^\uFEFF/, "");
+    const text = readTextFileSyncFlexible(pathName);
     return JSON.parse(text);
   } catch {
     return fallback;

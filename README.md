@@ -211,11 +211,38 @@ PerfectOne baseline coverage is below the 100% goal, the
 Coding Agent residual evidence is recorded in
 `mcp_reports/coding_agent_residual_attempt_history.json`. A single augmentation
 harness is not enough if coverage increased but remains below 100%; residual
-repair must continue up to five generated-artifact edit/replay/remeasure
-attempts per target function unless the remaining gap is classified with
-evidence as max-coverage, infeasible, crash-risk, or toolchain-blocked. When the
-evidence gate passes, the validator normalizes the canonical MCP report and
-removes stale `FINAL_REPORT_BLOCKED.md` markers.
+repair must continue until either the 100% goal is reached or two consecutive
+measured generated-artifact attempts show no coverage increase, with a hard
+limit of 10 attempts. When stopping below 100%, every residual target must be
+classified with evidence as max-coverage, infeasible, crash-risk, or
+toolchain-blocked. When the evidence gate passes, the validator normalizes the
+canonical MCP report and removes stale `FINAL_REPORT_BLOCKED.md` markers.
+
+Manual residual history must not rely on hand-entered coverage numbers alone.
+Each attempt needs a generated-artifact key and a parseable measurement artifact
+key, for example:
+
+```json
+{
+  "attempt": 1,
+  "changedArtifact": "coding_agent_residual/attempt1/residual_attempt1.c",
+  "coverageArtifact": "coding_agent_residual/attempt1/residual_attempt1_llvm.json",
+  "afterCoverage": {"line": 91.2, "branch": 84.3, "function": 96.7, "mcdc": 42.9}
+}
+```
+
+If the same aggregate residual attempts explain multiple target gaps, link them
+from each target instead of duplicating or omitting the relationship:
+
+```json
+{
+  "aggregateAttempts": ["...attempt records..."],
+  "perFunction": [
+    {"function": "func3", "attemptsRef": "aggregate", "stopReason": "max-coverage"},
+    {"function": "TD_main_0_0", "attemptsRef": "aggregate", "stopReason": "crash-risk"}
+  ]
+}
+```
 
 ## Output Disclaimer
 

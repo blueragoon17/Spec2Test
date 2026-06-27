@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 
 const root = path.resolve(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 
-function runGate({ attempts, files }) {
+function runGate({ attempts, files, coverageByAttempt = new Map() }) {
   const outDir = mkdtempSync(path.join(os.tmpdir(), "perfectone-plateau-policy-"));
   const reportDir = path.join(outDir, "mcp_reports");
   const residualDir = path.join(outDir, "residual");
@@ -33,9 +33,21 @@ function runGate({ attempts, files }) {
     for (const file of files) {
       writeFileSync(path.join(residualDir, file), `evidence for ${file}\n`);
     }
+    for (const [attempt, coverage] of coverageByAttempt.entries()) {
+      writeFileSync(path.join(residualDir, `attempt${attempt}_llvm.json`), JSON.stringify({
+        afterCoverage: coverage
+      }, null, 2));
+    }
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({
       schemaVersion: "perfectone.coding-agent-residual-attempt-history.v1",
-      aggregateAttempts: attempts
+      aggregateAttempts: attempts,
+      remainingGaps: [
+        {
+          function: "func1",
+          stopReason: "max-coverage",
+          evidence: "Two consecutive measured aggregate residual attempts showed no coverage increase."
+        }
+      ]
     }, null, 2));
     const messages = [
       { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
@@ -68,11 +80,12 @@ function coverage(pct) {
 }
 
 const repeatedSameArtifact = runGate({
-  files: ["residual_attempts.c", "attempt1_report.txt", "attempt2_report.txt", "attempt3_report.txt", "attempt4_report.txt", "attempt5_report.txt"],
+  files: ["residual_attempts.c"],
+  coverageByAttempt: new Map([80, 85, 85, 85, 85].map((pct, index) => [index + 1, coverage(pct)])),
   attempts: [80, 85, 85, 85, 85].map((pct, index) => ({
     attempt: index + 1,
     changedArtifact: "residual_attempts.c",
-    reportPath: `attempt${index + 1}_report.txt`,
+    coverageArtifact: `attempt${index + 1}_llvm.json`,
     replayCommand: `residual_attempts.exe ${index + 1}`,
     afterCoverage: coverage(pct)
   }))
@@ -82,12 +95,13 @@ if (repeatedSameArtifact.status !== "blocked" || !repeatedSameArtifact.blockers?
 }
 
 const sameArtifactWithHashes = runGate({
-  files: ["residual_attempts.c", "attempt1_report.txt", "attempt2_report.txt", "attempt3_report.txt", "attempt4_report.txt"],
+  files: ["residual_attempts.c"],
+  coverageByAttempt: new Map([80, 85, 85, 85].map((pct, index) => [index + 1, coverage(pct)])),
   attempts: [80, 85, 85, 85].map((pct, index) => ({
     attempt: index + 1,
     changedArtifact: "residual_attempts.c",
     changedArtifactHash: `hash-${index + 1}`,
-    reportPath: `attempt${index + 1}_report.txt`,
+    coverageArtifact: `attempt${index + 1}_llvm.json`,
     afterCoverage: coverage(pct)
   }))
 });
@@ -96,11 +110,12 @@ if (sameArtifactWithHashes.status !== "passed" || sameArtifactWithHashes.coverag
 }
 
 const stillIncreasing = runGate({
-  files: ["residual_attempt1.c", "residual_attempt2.c", "residual_attempt3.c", "attempt1_report.txt", "attempt2_report.txt", "attempt3_report.txt"],
+  files: ["residual_attempt1.c", "residual_attempt2.c", "residual_attempt3.c"],
+  coverageByAttempt: new Map([80, 85, 90].map((pct, index) => [index + 1, coverage(pct)])),
   attempts: [80, 85, 90].map((pct, index) => ({
     attempt: index + 1,
     changedArtifact: `residual_attempt${index + 1}.c`,
-    reportPath: `attempt${index + 1}_report.txt`,
+    coverageArtifact: `attempt${index + 1}_llvm.json`,
     afterCoverage: coverage(pct)
   }))
 });
@@ -109,11 +124,12 @@ if (stillIncreasing.status !== "blocked" || !stillIncreasing.blockers?.includes(
 }
 
 const twoNoIncrease = runGate({
-  files: ["residual_attempt1.c", "residual_attempt2.c", "residual_attempt3.c", "residual_attempt4.c", "attempt1_report.txt", "attempt2_report.txt", "attempt3_report.txt", "attempt4_report.txt"],
+  files: ["residual_attempt1.c", "residual_attempt2.c", "residual_attempt3.c", "residual_attempt4.c"],
+  coverageByAttempt: new Map([80, 85, 85, 85].map((pct, index) => [index + 1, coverage(pct)])),
   attempts: [80, 85, 85, 85].map((pct, index) => ({
     attempt: index + 1,
     changedArtifact: `residual_attempt${index + 1}.c`,
-    reportPath: `attempt${index + 1}_report.txt`,
+    coverageArtifact: `attempt${index + 1}_llvm.json`,
     afterCoverage: coverage(pct)
   }))
 });
@@ -121,10 +137,29 @@ if (twoNoIncrease.status !== "passed" || twoNoIncrease.residualCoverageProgress?
   throw new Error(`two consecutive no-increase repair attempts should allow final reporting below 100%: ${JSON.stringify(twoNoIncrease)}`);
 }
 
+const mismatchedManualCoverage = runGate({
+  files: ["residual_attempt1.c", "residual_attempt2.c", "residual_attempt3.c"],
+  coverageByAttempt: new Map([
+    [1, coverage(80)],
+    [2, coverage(80)],
+    [3, coverage(80)]
+  ]),
+  attempts: [80, 90, 90].map((pct, index) => ({
+    attempt: index + 1,
+    changedArtifact: `residual_attempt${index + 1}.c`,
+    coverageArtifact: `attempt${index + 1}_llvm.json`,
+    afterCoverage: coverage(pct)
+  }))
+});
+if (mismatchedManualCoverage.status !== "blocked" || !JSON.stringify(mismatchedManualCoverage.residualCoverageProgress).includes("declared_coverage_mismatch_with_artifact")) {
+  throw new Error(`manual afterCoverage that disagrees with coverage artifact must be blocked: ${JSON.stringify(mismatchedManualCoverage)}`);
+}
+
 console.log(JSON.stringify({
   status: "passed",
   repeatedSameArtifactGateStatus: repeatedSameArtifact.status,
   sameArtifactWithHashesGateStatus: sameArtifactWithHashes.status,
   stillIncreasingGateStatus: stillIncreasing.status,
-  twoNoIncreaseGateStatus: twoNoIncrease.status
+  twoNoIncreaseGateStatus: twoNoIncrease.status,
+  mismatchedManualCoverageGateStatus: mismatchedManualCoverage.status
 }, null, 2));

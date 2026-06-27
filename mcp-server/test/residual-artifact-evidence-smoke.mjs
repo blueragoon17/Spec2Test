@@ -126,8 +126,8 @@ try {
   if (passedResult.attemptHistoryPath !== "discovered-residual-artifacts") {
     throw new Error(`expected discovered artifact evidence, got ${passedResult.attemptHistoryPath}`);
   }
-  if (passedResult.aggregateEvidenceSatisfied !== true) {
-    throw new Error(`aggregate residual evidence was not accepted: ${JSON.stringify(passedResult)}`);
+  if (passedResult.coveragePlateauSatisfied !== true || passedResult.classifiedRemainingGapCount < 3) {
+    throw new Error(`aggregate plateau and classified residual gaps were not accepted: ${JSON.stringify(passedResult)}`);
   }
   if (passedResult.missingTargets?.length) {
     throw new Error(`fully classified aggregate evidence should satisfy target coverage history without per-function duplication: ${JSON.stringify(passedResult.missingTargets)}`);
@@ -149,7 +149,7 @@ try {
   console.log(JSON.stringify({
     status: "passed",
     firstGateStatus: result.status,
-    aggregateEvidenceSatisfied: passedResult.aggregateEvidenceSatisfied,
+    coveragePlateauSatisfied: passedResult.coveragePlateauSatisfied,
     attemptCount: passedResult.attemptCount,
     classifiedRemainingGapCount: passedResult.classifiedRemainingGapCount,
     finalAnswerAllowed: passedResult.finalAnswerAllowed

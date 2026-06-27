@@ -417,7 +417,7 @@ async function main() {
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.parallelExecution === true, "Coding-agent residual strategy did not enable parallel residual jobs");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.fallbackOrder?.join(",") === "docker-klee-baseline,windows-local-llvm-lld-link,local-no-klee", "Coding-agent residual fallback order is wrong");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.owner === "Coding Agent", "Residual owner should be Coding Agent");
-    assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.maxAttempts === 5, "Coding-agent residual max attempts is not 5");
+    assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.maxAttempts === 10, "Coding-agent residual max attempts is not 10");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.noImprovementLimit === 2, "Coding-agent residual no-improvement early-stop limit is not 2");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.continuationRule?.includes("coverage-increasing"), "Coding-agent residual continuation rule missing");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.iterationPolicy?.mustDirectlyModifyGeneratedArtifacts === true, "Coding-agent residual policy must require generated artifact edits");
@@ -427,14 +427,14 @@ async function main() {
     assert(result.report?.cUnitVerificationFlow?.codingAgentTestAugmentation?.codeOnlyDefault?.alwaysExecute?.includes("equivalence_partition"), "equivalence-partition augmentation missing");
     assert(result.report?.cUnitVerificationFlow?.codingAgentTestAugmentation?.codeOnlyDefault?.conditionalExecute?.includes("undefined_behavior_corner"), "UB conditional augmentation missing");
     assert(Array.isArray(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction), "Coding-agent residual per-function loop missing");
-    assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.every((item) => item.residualLoop?.maxAttempts === 5), "Per-function residual max attempts is not 5");
+    assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.every((item) => item.residualLoop?.maxAttempts === 10), "Per-function residual max attempts is not 10");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.every((item) => item.residualLoop?.noImprovementLimit === 2), "Per-function residual no-improvement early-stop limit is not 2");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.every((item) => item.residualLoop?.continuationRule?.includes("next attempt is mandatory")), "Per-function residual continuation rule missing");
     assert(result.report?.residualTargets?.some((item) => item.function === "alpha" && item.reason === "per_function_coverage_below_goal"), "alpha per-function residual target was not detected");
     assert(!result.report?.residualTargets?.some((item) => item.function === "beta"), "beta should not be a residual target when per-function coverage is 100%");
     assert(result.report?.cUnitVerificationFlow?.codingAgentResidual?.perFunction?.some((item) => item.function === "alpha" && item.unmetMetrics?.line && item.unmetMetrics?.branch), "Coding Agent Residual loop did not carry alpha unmet metrics");
     assert(result.codingAgentResidualRepairPlan?.executionRequired === true, "Coding-agent residual repair plan was not marked required");
-    assert(result.codingAgentResidualRepairPlan?.attemptAccounting?.maxAttemptsPerFunction === 5, "Coding-agent residual repair plan max attempts is not 5");
+    assert(result.codingAgentResidualRepairPlan?.attemptAccounting?.maxAttemptsPerFunction === 10, "Coding-agent residual repair plan max attempts is not 10");
     assert(result.codingAgentResidualRepairPlan?.attemptAccounting?.runnerKleeRerunsCountAsCodingAgentAttempts === false, "Runner KLEE reruns must not count as coding-agent residual attempts");
     assert(result.codingAgentResidualRepairPlan?.attemptAccounting?.mustModifyGeneratedArtifact === true, "Coding-agent residual attempts must require generated artifact edits");
     assert(result.codingAgentResidualRepairPlan?.targets?.some((item) => item.function === "alpha"), "Coding-agent residual repair plan did not include alpha");
@@ -481,7 +481,7 @@ async function main() {
     assert(html.includes("PerfectOne Coverage"), "HTML report missing PerfectOne cumulative coverage section");
     assert(html.includes("Coding Agent Applied Cumulative"), "HTML report missing coding-agent cumulative coverage section");
     assert(html.includes("Coding Agent Increase"), "HTML report missing coding-agent increase section");
-    assert(html.includes("5 coding-agent residual attempts per function"), "HTML report missing legacy attempt accounting field");
+    assert(html.includes("10 coding-agent residual attempts per function"), "HTML report missing attempt accounting field");
     assert(html.includes("Early-stop evidence threshold"), "HTML report missing early-stop evidence threshold");
     assert(html.includes("Max-attempt count alone is not a stop condition"), "HTML report must not present max attempts as the stop condition");
     assert(html.includes("Struct depth"), "HTML report missing coverage option clamp section");

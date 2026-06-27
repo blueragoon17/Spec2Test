@@ -14,6 +14,12 @@ function validateCoverage(finalCoverage, residualAttempts = [], historyPatch = {
   mkdirSync(reportDir, { recursive: true });
   mkdirSync(residualDir, { recursive: true });
   try {
+    const preparedResidualAttempts = residualAttempts.map((attempt) => {
+      if (attempt?.afterCoverage && !attempt.coverageArtifact && typeof attempt.changedArtifact === "string" && !attempt.changedArtifact.includes("does-not-exist") && !attempt.changedArtifact.includes("..") && !path.isAbsolute(attempt.changedArtifact)) {
+        return { ...attempt, coverageArtifact: `residual_attempt${attempt.attempt || 1}_llvm.json` };
+      }
+      return attempt;
+    });
     writeFileSync(path.join(reportDir, "perfectone_mcp_report.json"), JSON.stringify({
       schemaVersion: "perfectone.unitverify.c.coverage.report.v1",
       status: "needs_coding_agent_residual",
@@ -34,13 +40,16 @@ function validateCoverage(finalCoverage, residualAttempts = [], historyPatch = {
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({
       schemaVersion: "perfectone.coding-agent-residual-attempt-history.v1",
       finalCoverage,
-      residualAttempts,
+      residualAttempts: preparedResidualAttempts,
       ...historyPatch
     }, null, 2));
-    for (const attempt of residualAttempts) {
+    for (const attempt of preparedResidualAttempts) {
       for (const candidate of [attempt.changedArtifact, attempt.reportPath, attempt.logPath, attempt.coverageArtifact, attempt.measurementArtifact]) {
         if (candidate && typeof candidate === "string" && candidate !== "." && !candidate.includes("does-not-exist") && !candidate.includes("..") && !path.isAbsolute(candidate)) {
-          writeFileSync(path.join(residualDir, candidate), `evidence for ${candidate}\n`);
+          const text = candidate === attempt.coverageArtifact && /\.json$/i.test(candidate)
+            ? JSON.stringify({ afterCoverage: attempt.afterCoverage }, null, 2)
+            : `evidence for ${candidate}\n`;
+          writeFileSync(path.join(residualDir, candidate), text);
         }
       }
     }
@@ -294,13 +303,13 @@ const completeWithFileUrlArtifact = validateCoverageWithPrewrittenArtifacts(
   [],
   ({ residualDir }) => {
     const changedArtifact = path.join(residualDir, "residual_attempt1.c");
-    const reportPath = path.join(residualDir, "residual_attempt1_report.txt");
+    const coverageArtifact = path.join(residualDir, "residual_attempt1_llvm.json");
     writeFileSync(changedArtifact, "/* generated residual attempt */\n");
-    writeFileSync(reportPath, "coverage report\n");
+    writeFileSync(coverageArtifact, JSON.stringify({ afterCoverage: { line: 100, branch: 100, function: 100, mcdc: 100 } }, null, 2));
     return [{
       attempt: 1,
       changedArtifact: pathToFileURL(changedArtifact).href,
-      reportPath: pathToFileURL(reportPath).href,
+      coverageArtifact: pathToFileURL(coverageArtifact).href,
       afterCoverage: { line: 100, branch: 100, function: 100, mcdc: 100 }
     }];
   }

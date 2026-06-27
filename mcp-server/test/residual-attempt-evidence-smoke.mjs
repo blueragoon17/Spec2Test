@@ -110,10 +110,10 @@ function validateStructuredHistoryCase() {
     const residualAttempts = [];
     for (let attempt = 1; attempt <= 5; attempt += 1) {
       const changedArtifact = `residual_attempt${attempt}.c`;
-      const reportPath = `residual_attempt${attempt}_report.txt`;
+      const coverageArtifact = `residual_attempt${attempt}_llvm.json`;
       writeFileSync(path.join(residualDir, changedArtifact), `/* attempt ${attempt} */\n`);
-      writeFileSync(path.join(residualDir, reportPath), `attempt ${attempt} coverage report\n`);
-      residualAttempts.push({ attempt, changedArtifact, reportPath, afterCoverage: plateauCoverageForAttempt(attempt) });
+      writeFileSync(path.join(residualDir, coverageArtifact), JSON.stringify({ afterCoverage: plateauCoverageForAttempt(attempt) }, null, 2));
+      residualAttempts.push({ attempt, changedArtifact, coverageArtifact, afterCoverage: plateauCoverageForAttempt(attempt) });
     }
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({ residualAttempts }, null, 2));
     writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
@@ -178,10 +178,10 @@ function validateDuplicateAttemptHistoryCase() {
     ];
     for (let attempt = 1; attempt <= 5; attempt += 1) {
       const changedArtifact = `residual_attempt${attempt}.c`;
-      const reportPath = `residual_attempt${attempt}_report.txt`;
+      const coverageArtifact = `residual_attempt${attempt}_llvm.json`;
       writeFileSync(path.join(residualDir, changedArtifact), `/* attempt ${attempt} */\n`);
-      writeFileSync(path.join(residualDir, reportPath), `attempt ${attempt} coverage report\n`);
-      residualAttempts.push({ attempt, changedArtifact, reportPath, afterCoverage: plateauCoverageForAttempt(attempt) });
+      writeFileSync(path.join(residualDir, coverageArtifact), JSON.stringify({ afterCoverage: plateauCoverageForAttempt(attempt) }, null, 2));
+      residualAttempts.push({ attempt, changedArtifact, coverageArtifact, afterCoverage: plateauCoverageForAttempt(attempt) });
     }
     writeFileSync(path.join(reportDir, "coding_agent_residual_attempt_history.json"), JSON.stringify({ residualAttempts }, null, 2));
     writeFileSync(path.join(reportDir, "FINAL_RESIDUAL_SUMMARY.md"), [
@@ -616,8 +616,8 @@ if (duplicateAttemptHistory.status !== "passed" || duplicateAttemptHistory.cover
 }
 
 const partialHistoryWithDiscoveredArtifacts = validatePartialHistoryWithDiscoveredArtifactsCase();
-if (partialHistoryWithDiscoveredArtifacts.status !== "passed" || partialHistoryWithDiscoveredArtifacts.coveragePlateauSatisfied !== true) {
-  throw new Error(`partial JSON history should be merged with discovered artifact evidence: ${JSON.stringify(partialHistoryWithDiscoveredArtifacts)}`);
+if (partialHistoryWithDiscoveredArtifacts.status !== "blocked" || !partialHistoryWithDiscoveredArtifacts.blockers?.includes("residual_repair_attempt_sequence_incomplete")) {
+  throw new Error(`partial JSON history missing measurement keys should stay blocked: ${JSON.stringify(partialHistoryWithDiscoveredArtifacts)}`);
 }
 
 const symlinkEscape = validateSymlinkEscapeCase();
