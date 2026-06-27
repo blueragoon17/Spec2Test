@@ -4162,10 +4162,18 @@ function renderHtmlReport(report, diagnosticSummary) {
 function normalizeAttemptHistory(raw) {
   if (!raw) return { attempts: [], perFunction: [], finalCoverage: null, source: null };
   if (Array.isArray(raw)) return { attempts: raw, perFunction: [], finalCoverage: null, source: null };
+  const legacyPerFunction = Array.isArray(raw.perFunctionStopReasons)
+    ? raw.perFunctionStopReasons.map((item) => ({
+      function: item.function || item.targetFunction || item.symbol,
+      attempts: item.attempts || item.attemptHistory || [],
+      stopReason: item.stopReason || item.reason || item.status,
+      evidence: item.evidence || item.details || item.message
+    }))
+    : [];
   return {
-    attempts: Array.isArray(raw.attempts) ? raw.attempts : [],
-    perFunction: Array.isArray(raw.perFunction) ? raw.perFunction : [],
-    finalCoverage: raw.finalCoverage || raw.coverage || null,
+    attempts: Array.isArray(raw.attempts) ? raw.attempts : (Array.isArray(raw.residualAttempts) ? raw.residualAttempts : []),
+    perFunction: Array.isArray(raw.perFunction) ? raw.perFunction : legacyPerFunction,
+    finalCoverage: raw.finalCoverage || raw.bestCodingAgentCoverage || raw.coverage || null,
     source: raw.source || null
   };
 }
@@ -4199,6 +4207,21 @@ function targetStopIsAcceptable(entry) {
   const stopReason = String(entry?.stopReason || entry?.status || "").toLowerCase();
   const classified = ["max-coverage", "max_coverage", "infeasible", "crash-risk", "crash_risk", "toolchain-blocked", "toolchain_blocked"].some((needle) => stopReason.includes(needle));
   return attempts.length >= C_RESIDUAL_MAX_ATTEMPTS || classified || entry?.goalReached === true || entry?.coverageGoalReached === true;
+}
+
+function clearFinalBlockingAction(action, message) {
+  const base = action && typeof action === "object" && !Array.isArray(action) ? action : {};
+  return {
+    ...base,
+    required: false,
+    completionBlocked: false,
+    finalAnswerAllowed: true,
+    nextRequiredAction: null,
+    reason: "Final evidence gate passed.",
+    message,
+    targetCount: 0,
+    requiredEvidence: []
+  };
 }
 
 function buildCFinalEvidenceGate({ report, outDir }) {
@@ -4288,30 +4311,38 @@ function applyPassedFinalEvidenceGateToReport(report, gate) {
   normalized.nextRequiredAction = null;
   normalized.finalEvidenceGate = gate;
   if (normalized.actionRequired) {
-    normalized.actionRequired = {
-      ...normalized.actionRequired,
-      required: false,
-      completionBlocked: false,
-      finalAnswerAllowed: true,
-      nextRequiredAction: null,
-      reason: "Coding-agent residual evidence satisfied the final evidence gate."
-    };
+    normalized.actionRequired = clearFinalBlockingAction(
+      normalized.actionRequired,
+      "Final evidence gate passed. No further action is required before the final answer."
+    );
   }
   if (normalized.codingAgentResidualActionRequired) {
-    normalized.codingAgentResidualActionRequired = {
-      ...normalized.codingAgentResidualActionRequired,
-      required: false,
-      completionBlocked: false,
-      finalAnswerAllowed: true,
-      nextRequiredAction: null,
-      reason: "Coding-agent residual evidence satisfied the final evidence gate."
-    };
+    normalized.codingAgentResidualActionRequired = clearFinalBlockingAction(
+      normalized.codingAgentResidualActionRequired,
+      "Coding-agent residual evidence satisfied the final evidence gate. No further residual repair is required before the final answer."
+    );
+  }
+  if (normalized.codingAgentTestAugmentationActionRequired) {
+    normalized.codingAgentTestAugmentationActionRequired = clearFinalBlockingAction(
+      normalized.codingAgentTestAugmentationActionRequired,
+      "Coding-agent testcase augmentation evidence satisfied the final evidence gate. No further testcase augmentation is required before the final answer."
+    );
   }
   if (normalized.codingAgentResidualRepairPlan) {
     normalized.codingAgentResidualRepairPlan = {
       ...normalized.codingAgentResidualRepairPlan,
       executionRequired: false,
-      attemptHistory: gate.attemptHistoryPath || normalized.codingAgentResidualRepairPlan.attemptHistory || null
+      nextRequiredAction: null,
+      attemptHistory: gate.attemptHistoryPath || normalized.codingAgentResidualRepairPlan.attemptHistory || null,
+      message: "Residual repair attempt history satisfied the final evidence gate."
+    };
+  }
+  if (normalized.codingAgentTestAugmentationPlan) {
+    normalized.codingAgentTestAugmentationPlan = {
+      ...normalized.codingAgentTestAugmentationPlan,
+      executionRequired: false,
+      nextRequiredAction: null,
+      message: "Test augmentation evidence satisfied the final evidence gate."
     };
   }
   return normalized;
@@ -4320,6 +4351,7 @@ function applyPassedFinalEvidenceGateToReport(report, gate) {
 async function writeReportBundle(outDir, report, diagnosticSummary, options = {}) {
   const generated = [];
   try {
+    if (!Array.isArray(report.diagnostics)) report.diagnostics = [];
     const reportDir = path.join(outDir, "mcp_reports");
     const reportBaseName = options.reportBaseName || "perfectone_mcp_report";
     const isCanonicalReport = reportBaseName === "perfectone_mcp_report";
@@ -4330,7 +4362,30 @@ async function writeReportBundle(outDir, report, diagnosticSummary, options = {}
     const htmlPath = path.join(reportDir, `${reportBaseName}.html`);
     const sanitizedReport = sanitizeJsonValue(report);
     await writeFile(jsonPath, JSON.stringify(sanitizedReport, null, 2), "utf8");
-    await writeFile(mdPath, renderMarkdownReport(report, diagnosticSummary), "utf8");
+    let mdText = "";
+    try {
+      mdText = renderMarkdownReport(report, diagnosticSummary);
+    } catch (error) {
+      pushDiagnostic(report.diagnostics, {
+        severity: "warning",
+        code: "markdown_report_render_failed",
+        message: `Markdown report renderer fell back to diagnostic Markdown: ${String(error)}`,
+        source: "mcp"
+      });
+      mdText = [
+        "# PerfectOne Unit Verify Report",
+        "",
+        `- status: ${report.status || "unknown"}`,
+        `- runId: ${report.runId || "unknown"}`,
+        `- final answer allowed: ${report.finalAnswerAllowed === false ? "no" : "yes"}`,
+        `- next required action: ${report.nextRequiredAction || "none"}`,
+        "",
+        "## Diagnostic Report",
+        "",
+        "The full Markdown renderer failed, but this fallback report was regenerated from the current MCP JSON state."
+      ].join("\n");
+    }
+    await writeFile(mdPath, mdText, "utf8");
     let htmlText = "";
     try {
       htmlText = renderHtmlReport(report, diagnosticSummary);
@@ -4344,7 +4399,7 @@ async function writeReportBundle(outDir, report, diagnosticSummary, options = {}
       htmlText = renderSimpleHtmlPage({
         title: "PerfectOne Unit Verify Report",
         body: [
-          `<p><strong>Status:</strong> ${htmlEscape(report.status)}<br><strong>Run:</strong> ${htmlEscape(report.runId || "unknown")}</p>`,
+          `<p><strong>Status:</strong> ${htmlEscape(report.status)}<br><strong>Run:</strong> ${htmlEscape(report.runId || "unknown")}<br><strong>Final answer allowed:</strong> ${htmlEscape(report.finalAnswerAllowed === false ? "no" : "yes")}<br><strong>Next required action:</strong> ${htmlEscape(report.nextRequiredAction || "none")}</p>`,
           "<h2>Review Pages</h2>",
           "<h2>C Coverage Flow</h2>",
           "<h2>Residual Loop Policy</h2>",
@@ -9111,7 +9166,10 @@ async function validateCFinalEvidence(args = {}) {
     if (existsSync(allowedPath)) unlinkSync(allowedPath);
   } else {
     const normalizedReport = applyPassedFinalEvidenceGateToReport(report, gate);
-    await writeFile(reportPath, JSON.stringify(sanitizeJsonValue(normalizedReport), null, 2), "utf8");
+    const diagnosticSummary = summarizeDiagnostics(normalizedReport.diagnostics || []);
+    normalizedReport.diagnosticSummary = normalizedReport.diagnosticSummary || diagnosticSummary;
+    const reportBaseName = path.basename(reportPath, ".json") || "perfectone_mcp_report";
+    await writeReportBundle(outDir, normalizedReport, diagnosticSummary, { reportBaseName });
     if (existsSync(blockedPath)) unlinkSync(blockedPath);
     await writeFile(allowedPath, [
       "# Final Report Allowed",
@@ -9186,16 +9244,6 @@ async function runCUnitVerifyFull({ cliPath, args }) {
       completionBlocked: true,
       message: "Previous PerfectOne C verification results were found. Ask the user whether to reuse them. The default selection is a new run."
     };
-  }
-  if (executionMode === "docker" && dockerPreparationBefore.status === "docker_daemon_unavailable") {
-    pushDiagnostic(diagnostics, {
-      severity: "error",
-      code: "docker_daemon_unavailable",
-      message: dockerPreparationBefore.message,
-      source: "mcp",
-      blocking: true,
-      details: dockerPreparationBefore
-    });
   }
   if (args.reusePreviousRun === true) {
     const selectedOutDir = path.resolve(args.previousRunOutDir || args.outDir || previousRuns.runs[0]?.outDir || request.outDir || projectRoot);
@@ -9834,7 +9882,7 @@ async function handle(message) {
       result: {
         protocolVersion: "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.4" }
+        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.5" }
       }
     });
     return;
