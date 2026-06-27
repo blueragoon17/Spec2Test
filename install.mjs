@@ -116,14 +116,35 @@ function runCodexCommand(args, dry) {
   };
 }
 
+function runMarketplaceAdd(marketplaceRoot, marketplaceName, dry) {
+  const initialAdd = runCodexCommand(["plugin", "marketplace", "add", marketplaceRoot], dry);
+  if (initialAdd.exitCode === 0 || !/already added from a different source/i.test(initialAdd.stderr || "")) {
+    return initialAdd;
+  }
+  const remove = runCodexCommand(["plugin", "marketplace", "remove", marketplaceName], dry);
+  const retryAdd = remove.exitCode === 0
+    ? runCodexCommand(["plugin", "marketplace", "add", marketplaceRoot], dry)
+    : null;
+  return {
+    ...(retryAdd || initialAdd),
+    recoveredDifferentSource: Boolean(retryAdd && retryAdd.exitCode === 0),
+    recovery: {
+      initialAdd,
+      remove,
+      retryAdd
+    }
+  };
+}
+
 function runCodexPluginRegistration(marketplaceRoot, dry) {
+  const marketplaceName = "perfectone-local";
   const codexAvailable = spawnSync("codex", ["--help"], { encoding: "utf8", shell: process.platform === "win32" });
   if ((codexAvailable.status ?? 1) !== 0) {
     return { attempted: false, method: "config-fallback", reason: "codex-cli-not-found" };
   }
   const marketplaceAddSupported = codexCommandSupports(["plugin", "marketplace", "--help"], /\badd\b/);
   const marketplaceAdd = marketplaceAddSupported
-    ? runCodexCommand(["plugin", "marketplace", "add", marketplaceRoot], dry)
+    ? runMarketplaceAdd(marketplaceRoot, marketplaceName, dry)
     : null;
   const pluginAddSupported = codexCommandSupports(["plugin", "--help"], /\badd\b/);
   if (pluginAddSupported) {
