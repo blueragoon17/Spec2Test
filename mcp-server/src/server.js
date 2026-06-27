@@ -4261,7 +4261,26 @@ function discoverResidualEvidenceFromArtifacts(outDir) {
       attemptsByNumber.set(attempt, current);
     }
   }
-  const attempts = [...attemptsByNumber.values()].sort((a, b) => a.attempt - b.attempt);
+  const allAttempts = [...attemptsByNumber.values()].sort((a, b) => a.attempt - b.attempt);
+  const isCrashOnlyProbeAttempt = (attempt) => {
+    const artifacts = Array.isArray(attempt?.artifacts) ? attempt.artifacts : [];
+    if (artifacts.length === 0) return false;
+    const names = artifacts.map((artifactPath) => path.basename(String(artifactPath || "")).toLowerCase());
+    const tdMainScoped = names.every((name) => name.includes("tdmain") || name.includes("td_main"));
+    if (!tdMainScoped) return false;
+    const hasCoverageExport = names.some((name) => /\.info$/i.test(name) || /_llvm\.json$/i.test(name));
+    if (hasCoverageExport) return false;
+    return artifacts.some((artifactPath) => {
+      if (!/\.profraw$/i.test(String(artifactPath || ""))) return false;
+      try {
+        return statSync(artifactPath).size === 0;
+      } catch {
+        return false;
+      }
+    });
+  };
+  const crashOnlyProbeAttempts = allAttempts.filter(isCrashOnlyProbeAttempt);
+  const attempts = allAttempts.filter((attempt) => !isCrashOnlyProbeAttempt(attempt));
   const summaryCandidates = [
     path.join(outDir, "mcp_reports", "FINAL_RESIDUAL_SUMMARY.md"),
     path.join(outDir, "FINAL_RESIDUAL_SUMMARY.md"),
@@ -4279,11 +4298,19 @@ function discoverResidualEvidenceFromArtifacts(outDir) {
       // Ignore unreadable optional summaries.
     }
   }
-  const tdProbeDir = path.join(outDir, "residual");
-  if (existsSync(tdProbeDir)) {
+  for (const attempt of crashOnlyProbeAttempts) {
+    if (!remainingGaps.some((item) => item.function === "TD_main_0_0")) {
+      remainingGaps.push({
+        function: "TD_main_0_0",
+        stopReason: "crash-risk",
+        evidence: `Crash-only TD_main_0_0 probe in attempt ${attempt.attempt}; zero-byte profiler output is not a coverage-growth retry attempt.`
+      });
+    }
+  }
+  for (const tdProbeDir of residualDirs) {
     try {
       for (const entry of readdirSync(tdProbeDir, { withFileTypes: true })) {
-        if (!entry.isFile() || !/^tdmain_probe.*\.profraw$/i.test(entry.name)) continue;
+        if (!entry.isFile() || !/^(?:tdmain_probe|attempt\d+_tdmain).*\.(?:profraw)$/i.test(entry.name)) continue;
         const fullPath = path.join(tdProbeDir, entry.name);
         const size = statSync(fullPath).size;
         if (size === 0 && !remainingGaps.some((item) => item.function === "TD_main_0_0")) {
@@ -10053,7 +10080,7 @@ async function handle(message) {
       result: {
         protocolVersion: "2025-06-18",
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.7" }
+        serverInfo: { name: "perfectone-unit-verify", version: "0.2.0-beta.8" }
       }
     });
     return;

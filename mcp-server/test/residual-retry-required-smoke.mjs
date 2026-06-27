@@ -73,6 +73,8 @@ try {
     writeFileSync(path.join(residualDir, `attempt${attempt}_report.txt`), `attempt ${attempt}\n`);
     writeFileSync(path.join(residualDir, `attempt${attempt}.info`), "TN:\n");
   }
+  writeFileSync(path.join(residualDir, "attempt2_tdmain.profraw"), "");
+  writeFileSync(path.join(residualDir, "attempt2_tdmain_report.txt"), "TD_main crash probe\n");
   writeFileSync(path.join(residualDir, "tdmain_probe.profraw"), "");
 
   const result = validate();

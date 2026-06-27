@@ -1,6 +1,6 @@
 {
   "name": "perfectone-unit-verify",
-  "version": "0.2.0-beta.7",
+  "version": "0.2.0-beta.8",
   "description": "Open Plugin Beta for C coverage/assertion verification with PerfectOne, source-derived C design drafts, filtered KLEE/MC/DC, and Coding Agent residual reporting.",
   "author": {
     "name": "PerfectOne"
