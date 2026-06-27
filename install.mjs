@@ -56,6 +56,99 @@ function linkSkill(linkPath, target) {
   symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
 }
 
+function replaceDirectoryLink(linkPath, target, dry) {
+  if (existsSync(linkPath)) {
+    if (!dry) rmSync(linkPath, { recursive: true, force: true });
+  }
+  if (!dry) {
+    mkdirSync(path.dirname(linkPath), { recursive: true });
+    symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
+  }
+}
+
+function ensureLocalMarketplaceRoot(home, root, dry) {
+  const marketplaceRoot = path.join(home, "plugins", "local-marketplaces", "perfectone");
+  const marketplacePath = path.join(marketplaceRoot, ".agents", "plugins", "marketplace.json");
+  const marketplacePluginPath = path.join(marketplaceRoot, "plugins", "perfectone-unit-verify");
+  const marketplace = {
+    name: "perfectone-local",
+    interface: {
+      displayName: "PerfectOne Local"
+    },
+    plugins: [
+      {
+        name: "perfectone-unit-verify",
+        source: {
+          source: "local",
+          path: "./plugins/perfectone-unit-verify"
+        },
+        policy: {
+          installation: "AVAILABLE",
+          authentication: "ON_INSTALL"
+        },
+        category: "Engineering"
+      }
+    ]
+  };
+  if (!dry) {
+    mkdirSync(path.dirname(marketplacePath), { recursive: true });
+    writeFileSync(marketplacePath, `${JSON.stringify(marketplace, null, 2)}\n`, "utf8");
+    replaceDirectoryLink(marketplacePluginPath, root, dry);
+  }
+  return { marketplaceRoot, marketplacePath, marketplacePluginPath };
+}
+
+function codexCommandSupports(args, pattern) {
+  const result = spawnSync("codex", args, { encoding: "utf8", shell: process.platform === "win32" });
+  if ((result.status ?? 1) !== 0) return false;
+  return pattern.test(`${result.stdout || ""}\n${result.stderr || ""}`);
+}
+
+function runCodexCommand(args, dry) {
+  if (dry) return { command: `codex ${args.join(" ")}`, exitCode: 0, stdout: "", stderr: "", dryRun: true };
+  const result = spawnSync("codex", args, { encoding: "utf8", shell: process.platform === "win32" });
+  return {
+    command: `codex ${args.join(" ")}`,
+    exitCode: result.status ?? null,
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+    dryRun: false
+  };
+}
+
+function runCodexPluginRegistration(marketplaceRoot, dry) {
+  const codexAvailable = spawnSync("codex", ["--help"], { encoding: "utf8", shell: process.platform === "win32" });
+  if ((codexAvailable.status ?? 1) !== 0) {
+    return { attempted: false, method: "config-fallback", reason: "codex-cli-not-found" };
+  }
+  const marketplaceAddSupported = codexCommandSupports(["plugin", "marketplace", "--help"], /\badd\b/);
+  const marketplaceAdd = marketplaceAddSupported
+    ? runCodexCommand(["plugin", "marketplace", "add", marketplaceRoot], dry)
+    : null;
+  const pluginAddSupported = codexCommandSupports(["plugin", "--help"], /\badd\b/);
+  if (pluginAddSupported) {
+    const pluginAdd = runCodexCommand(["plugin", "add", "perfectone-unit-verify@perfectone-local"], dry);
+    return {
+      attempted: true,
+      method: "codex-plugin-add",
+      marketplaceAdd,
+      pluginAdd,
+      exitCode: pluginAdd.exitCode,
+      stdout: pluginAdd.stdout,
+      stderr: pluginAdd.stderr
+    };
+  }
+  if (marketplaceAddSupported) {
+    return {
+      attempted: true,
+      method: "config-fallback",
+      marketplaceAdd,
+      reason: "codex-plugin-add-unavailable"
+    };
+  }
+  return { attempted: false, method: "config-fallback", reason: "codex-plugin-commands-unavailable" };
+}
+
 function removeStalePluginCaches(home, dry) {
   const cacheRoot = path.join(home, "plugins", "cache");
   const candidates = [
@@ -78,6 +171,7 @@ const codexHome = path.resolve(argValue(["--codexHome", "--codex-home"], path.jo
 const skipSkillLinks = hasFlag(["--skipSkillLinks", "--skip-skill-links"]);
 const skipDoctor = hasFlag(["--skipDoctor", "--skip-doctor"]);
 const dryRun = hasFlag(["--dryRun", "--dry-run"]);
+const skipCodexPluginCli = hasFlag(["--skipCodexPluginCli", "--skip-codex-plugin-cli"]);
 const pluginRoot = bundleRoot;
 const serverPath = path.join(pluginRoot, "mcp-server", "src", "server.js");
 const doctorPath = path.join(pluginRoot, "scripts", "doctor.mjs");
@@ -97,6 +191,10 @@ const stamp = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
 const backupPath = `${configPath}.bak.before-perfectone-unit-verify-install-${stamp}`;
 let configText = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
 const removedPluginCaches = removeStalePluginCaches(codexHome, dryRun);
+const localMarketplace = ensureLocalMarketplaceRoot(codexHome, pluginRoot, dryRun);
+const codexPluginRegistration = skipCodexPluginCli
+  ? { attempted: false, method: "config-fallback", reason: "skipped-by-user" }
+  : runCodexPluginRegistration(localMarketplace.marketplaceRoot, dryRun);
 const envLines = [`PERFECTONE_WORKSPACE_ROOT = "${tomlString(bundleRoot)}"`];
 if (cliPath) envLines.push(`PERFECTONE_CLI = "${tomlString(cliPath)}"`);
 const mcpBlock = `
@@ -111,7 +209,7 @@ const marketBlock = `
 [marketplaces.perfectone-local]
 last_updated = "${new Date().toISOString()}"
 source_type = "local"
-source = "${tomlString(bundleRoot)}"
+source = "${tomlString(localMarketplace.marketplaceRoot)}"
 `;
 const pluginBlock = `
 [plugins."perfectone-unit-verify@perfectone-local"]
@@ -135,4 +233,4 @@ if (!dryRun) {
   }
 }
 
-process.stdout.write(`${JSON.stringify({ status: "installed", dryRun, codexHome, configPath, backupPath: dryRun ? null : backupPath, pluginRoot, cliPath: cliPath || null, removedPluginCaches }, null, 2)}\n`);
+process.stdout.write(`${JSON.stringify({ status: "installed", dryRun, codexHome, configPath, backupPath: dryRun ? null : backupPath, pluginRoot, cliPath: cliPath || null, localMarketplace, codexPluginRegistration, removedPluginCaches }, null, 2)}\n`);

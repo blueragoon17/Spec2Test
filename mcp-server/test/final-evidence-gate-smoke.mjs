@@ -76,7 +76,8 @@ try {
     codingAgentResidualRepairPlan: {
       executionRequired: true,
       targets: [{ function: "target_func", unmetMetrics: ["line"] }],
-      attemptAccounting: { maxAttemptsPerFunction: 5 }
+      attemptAccounting: { maxAttemptsPerFunction: 5 },
+      attemptHistory: "embedded-report"
     },
     codingPlatformPrompt: "Coding Agent residual repair is mandatory before the final answer.",
     codingAgentResidualRepairPrompt: "Coding-agent residual repair is mandatory before the final answer.",
@@ -101,7 +102,7 @@ try {
   const historyJson = JSON.stringify({
     schemaVersion: "perfectone.coding-agent-residual-attempt-history.v1",
     bestCodingAgentCoverage: { line: { pct: 95 }, branch: { pct: 90 } },
-    residualAttempts: [
+    aggregateAttempts: [
       {
         function: "target_func",
         attempt: 1,
@@ -111,7 +112,7 @@ try {
         delta: { line: 20 }
       }
     ],
-    perFunctionStopReasons: [
+    perFunctionAttempts: [
       {
         function: "target_func",
         attempts: [{ attempt: 1, changedArtifact: "residual_attempt1.c", reportPath: "residual_attempt1_report.txt" }],
@@ -128,6 +129,9 @@ try {
 
   const passed = runValidate(3);
   if (passed.status !== "passed") throw new Error(`expected passed, got ${passed.status}: ${JSON.stringify(passed)}`);
+  if (passed.perFunctionCount < 1 || passed.hasPerFunctionEvidence !== true) {
+    throw new Error(`perFunctionAttempts was not recognized: ${JSON.stringify(passed)}`);
+  }
   if (existsSync(blockedPath)) throw new Error("stale FINAL_REPORT_BLOCKED.md was not removed");
   if (!existsSync(path.join(reportDir, "FINAL_REPORT_ALLOWED.md"))) throw new Error("expected FINAL_REPORT_ALLOWED.md");
   const rewritten = JSON.parse(readFileSync(path.join(reportDir, "perfectone_mcp_report.json"), "utf8"));

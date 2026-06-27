@@ -2,6 +2,7 @@ param(
   [string]$CodexHome,
   [switch]$SkipSkillLinks,
   [switch]$SkipDoctor,
+  [switch]$SkipCodexPluginCli,
   [switch]$DryRun
 )
 
@@ -11,6 +12,7 @@ $argsList = @($script)
 if ($CodexHome) { $argsList += @("--codexHome", $CodexHome) }
 if ($SkipSkillLinks) { $argsList += "--skipSkillLinks" }
 if ($SkipDoctor) { $argsList += "--skipDoctor" }
+if ($SkipCodexPluginCli) { $argsList += "--skipCodexPluginCli" }
 if ($DryRun) { $argsList += "--dryRun" }
 & node @argsList
 exit $LASTEXITCODE

@@ -47,6 +47,21 @@ The installer registers the local Codex plugin, MCP server, and skills. It
 does not install Docker or LLVM. The Windows CLI beta binary is included under
 `bin/windows/ClangParserForWin.exe`.
 
+The installer is compatible with both newer and older Codex plugin CLIs. It
+creates a local marketplace root under
+`%USERPROFILE%\.codex\plugins\local-marketplaces\perfectone`, links that
+marketplace plugin entry back to this repository, and uses `codex plugin add
+perfectone-unit-verify@perfectone-local` automatically when the installed Codex
+CLI supports it. Older Codex CLIs that only provide `codex plugin marketplace`
+fall back to direct `config.toml` registration.
+
+Equivalent marketplace commands for compatible Codex builds:
+
+```powershell
+codex plugin marketplace add "$env:USERPROFILE\.codex\plugins\local-marketplaces\perfectone"
+codex plugin add perfectone-unit-verify@perfectone-local
+```
+
 ## Prepare Windows C Environment
 
 Run the setup script only when you want it to install or prepare prerequisites.

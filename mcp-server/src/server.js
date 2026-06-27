@@ -4159,26 +4159,73 @@ function renderHtmlReport(report, diagnosticSummary) {
 `;
 }
 
+function normalizeAttemptList(value, entry = {}) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const base = item && typeof item === "object" && !Array.isArray(item)
+      ? { ...item }
+      : { attempt: Number(item) };
+    if (!Number.isFinite(Number(base.attempt))) return null;
+    const entryArtifacts = [
+      ...(Array.isArray(entry.changedArtifacts) ? entry.changedArtifacts : []),
+      ...(Array.isArray(entry.artifactPaths) ? entry.artifactPaths : []),
+      ...(Array.isArray(entry.logPaths) ? entry.logPaths : [])
+    ].filter((artifact) => typeof artifact === "string");
+    if (!base.changedArtifact && typeof entry.changedArtifact === "string") base.changedArtifact = entry.changedArtifact;
+    if (!base.changedArtifact && entryArtifacts.length > 0) base.changedArtifact = entryArtifacts[0];
+    const artifacts = [
+      ...(Array.isArray(base.artifacts) ? base.artifacts : []),
+      ...entryArtifacts
+    ].filter((artifact) => typeof artifact === "string");
+    if (artifacts.length > 0) base.artifacts = [...new Set(artifacts)];
+    return base;
+  }).filter(Boolean);
+}
+
+function normalizePerFunctionAttempts(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const legacyPerFunction = Array.isArray(raw.perFunctionStopReasons)
+    ? raw.perFunctionStopReasons
+    : [];
+  const source = Array.isArray(raw.perFunction)
+    ? raw.perFunction
+    : (Array.isArray(raw.perFunctionAttempts) ? raw.perFunctionAttempts : legacyPerFunction);
+  return source.map((item) => {
+    const stopReason = item.stopReason || item.reason || item.status;
+    const goalReached = item.goalReached === true
+      || item.coverageGoalReached === true
+      || /^goal[-_ ]?reached$/i.test(String(stopReason || ""));
+    return {
+      ...item,
+      function: item.function || item.targetFunction || item.symbol || item.name || item.target,
+      attempts: normalizeAttemptList(item.attempts || item.attemptHistory || [], item),
+      stopReason,
+      evidence: item.evidence || item.details || item.message || item.remainingGapEvidence,
+      goalReached,
+      coverageGoalReached: item.coverageGoalReached === true || goalReached
+    };
+  });
+}
+
+function attemptHistoryHasContent(raw) {
+  if (Array.isArray(raw)) return raw.length > 0;
+  if (!raw || typeof raw !== "object") return false;
+  for (const key of ["attempts", "residualAttempts", "aggregateAttempts", "perFunction", "perFunctionAttempts", "perFunctionStopReasons", "remainingGaps"]) {
+    if (Array.isArray(raw[key]) && raw[key].length > 0) return true;
+  }
+  for (const key of ["coverageLimits", "gaps"]) {
+    if (raw[key] && typeof raw[key] === "object" && Object.keys(raw[key]).length > 0) return true;
+  }
+  return Boolean(raw.finalCoverage || raw.bestCodingAgentCoverage || raw.codingAgentAppliedCumulative || raw.coverage);
+}
+
 function normalizeAttemptHistory(raw) {
   if (!raw) return { attempts: [], perFunction: [], finalCoverage: null, source: null };
   if (Array.isArray(raw)) return { attempts: raw, perFunction: [], finalCoverage: null, source: null };
-  const legacyPerFunction = Array.isArray(raw.perFunctionStopReasons)
-    ? raw.perFunctionStopReasons.map((item) => ({
-      ...item,
-      function: item.function || item.targetFunction || item.symbol,
-      attempts: item.attempts || item.attemptHistory || [],
-      stopReason: item.stopReason || item.reason || item.status,
-      evidence: item.evidence || item.details || item.message
-    }))
-    : [];
-  const perFunction = (Array.isArray(raw.perFunction) ? raw.perFunction : legacyPerFunction)
-    .map((item) => ({
-      ...item,
-      attempts: Array.isArray(item.attempts) ? item.attempts : (Array.isArray(item.attemptHistory) ? item.attemptHistory : [])
-    }));
+  if (typeof raw !== "object") return { attempts: [], perFunction: [], finalCoverage: null, remainingGaps: [], source: null };
   return {
-    attempts: Array.isArray(raw.attempts) ? raw.attempts : (Array.isArray(raw.residualAttempts) ? raw.residualAttempts : (Array.isArray(raw.aggregateAttempts) ? raw.aggregateAttempts : [])),
-    perFunction,
+    attempts: normalizeAttemptList(Array.isArray(raw.attempts) ? raw.attempts : (Array.isArray(raw.residualAttempts) ? raw.residualAttempts : (Array.isArray(raw.aggregateAttempts) ? raw.aggregateAttempts : []))),
+    perFunction: normalizePerFunctionAttempts(raw),
     finalCoverage: raw.finalCoverage || raw.bestCodingAgentCoverage || raw.codingAgentAppliedCumulative || raw.coverage || null,
     remainingGaps: normalizeRemainingGaps(raw.remainingGaps || raw.coverageLimits || raw.gaps || []),
     source: raw.source || null
@@ -4374,9 +4421,24 @@ function mergeResidualHistoryWithDiscovered(history, discovered) {
 }
 
 function loadResidualAttemptHistory(outDir, report) {
-  const embedded = report?.codingAgentResidualAttemptHistory || report?.codingAgentResidualRepairPlan?.attemptHistory || null;
   const discovered = discoverResidualEvidenceFromArtifacts(outDir);
-  if (embedded) return mergeResidualHistoryWithDiscovered({ ...normalizeAttemptHistory(embedded), path: "embedded-report" }, discovered);
+  const embeddedCandidates = [
+    report?.codingAgentResidualAttemptHistory,
+    report?.codingAgentResidualRepairPlan?.attemptHistory
+  ];
+  for (const embedded of embeddedCandidates) {
+    if (attemptHistoryHasContent(embedded)) {
+      return mergeResidualHistoryWithDiscovered({ ...normalizeAttemptHistory(embedded), path: "embedded-report" }, discovered);
+    }
+    if (typeof embedded === "string") {
+      for (const candidate of evidencePathCandidates(embedded, outDir)) {
+        const parsed = readJsonWithFallbackSync(candidate, null);
+        if (attemptHistoryHasContent(parsed)) {
+          return mergeResidualHistoryWithDiscovered({ ...normalizeAttemptHistory(parsed), path: candidate }, discovered);
+        }
+      }
+    }
+  }
   const candidates = [
     path.join(outDir, "mcp_reports", "coding_agent_residual_attempt_history.json"),
     path.join(outDir, "coding_agent_residual_attempt_history.json"),
