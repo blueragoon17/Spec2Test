@@ -15,7 +15,9 @@ coverage*.info
 html_cov/
 coverage_results/
 structuretraverser_debug.log
-bin/windows/
+bin/windows/*
 bin/linux/
 bin/macos/
 !bin/.gitkeep
+!bin/windows/
+!bin/windows/ClangParserForWin.exe

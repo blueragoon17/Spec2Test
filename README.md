@@ -1,10 +1,10 @@
 # Spec2Test
 
 Spec2Test is an Open Plugin Beta for C unit design and verification with
-Codex-compatible MCP/Skill plugin hosts. It connects Codex to an externally
-provisioned PerfectOne CLI, runs source-target filtered Docker KLEE coverage
-for C, and uses Windows LLVM/lld-link for residual native replay and MC/DC
-coverage evidence.
+Codex-compatible MCP/Skill plugin hosts. It includes the Windows PerfectOne
+CLI beta binary, runs source-target filtered Docker KLEE coverage for C, and
+uses Windows LLVM/lld-link for residual native replay and MC/DC coverage
+evidence.
 
 This beta is C-centered. Embedded targets are not validated yet. Non-C
 verification entrypoints are temporarily disabled in this beta plugin
@@ -14,8 +14,8 @@ distribution.
 
 | Area | Beta status |
 | --- | --- |
-| Windows C artifact generation | Supported with external `ClangParserForWin.exe` |
-| Windows C KLEE baseline | Supported through Docker |
+| Windows C artifact generation | Supported with bundled `bin/windows/ClangParserForWin.exe` |
+| Windows C KLEE baseline | Supported through required Docker Desktop |
 | Windows C residual MC/DC | Supported with LLVM 21+ and `lld-link.exe` |
 | WSL execution | Disabled |
 | Embedded C | Unvalidated beta, setup blocker until target context is provided |
@@ -25,9 +25,10 @@ distribution.
 
 - Node.js 18 or newer.
 - Codex desktop or a compatible MCP/Skill plugin host.
-- A separately provisioned PerfectOne CLI. For Windows C, place it at
-  `bin/windows/ClangParserForWin.exe` or set `PERFECTONE_CLI`.
-- Docker Desktop with the Linux engine enabled.
+- Windows PerfectOne CLI at `bin/windows/ClangParserForWin.exe` or an override
+  through `PERFECTONE_CLI`.
+- Docker Desktop with the Linux engine enabled. Docker is mandatory for the
+  Windows C KLEE baseline.
 - Docker base image `klee/klee:v3.2`.
 - Prepared image `perfectone/klee-coverage-tools:llvm18-lcov-v1`.
 - Windows LLVM 21 or newer: `clang.exe`, `lld-link.exe`, `llvm-cov.exe`,
@@ -43,7 +44,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 ```
 
 The installer registers the local Codex plugin, MCP server, and skills. It
-does not install Docker, LLVM, or PerfectOne CLI binaries.
+does not install Docker or LLVM. The Windows CLI beta binary is included under
+`bin/windows/ClangParserForWin.exe`.
 
 ## Prepare Windows C Environment
 
@@ -73,22 +75,64 @@ LLVM install command used by the setup script:
 winget install --id LLVM.LLVM -e --source winget --accept-package-agreements --accept-source-agreements
 ```
 
-## Provide PerfectOne CLI
+## PerfectOne CLI Location
 
-This repository does not contain PerfectOne CLI binaries. Provide one of:
-
-```powershell
-$env:PERFECTONE_CLI = "C:\Path\To\ClangParserForWin.exe"
-```
-
-or copy the binary to:
+The beta repository includes:
 
 ```text
 bin/windows/ClangParserForWin.exe
 ```
 
+To override it, set:
+
+```powershell
+$env:PERFECTONE_CLI = "C:\Path\To\ClangParserForWin.exe"
+```
+
 Only one current CLI should be used for a run. The doctor reports missing or
 ambiguous CLI configuration.
+
+## Direct CLI Usage
+
+You can use the bundled CLI without Codex/MCP when you need a raw PerfectOne
+run. Docker Desktop must be installed and running for Windows C KLEE coverage.
+If Docker Desktop is not running, the MCP path attempts to start it
+automatically; direct CLI usage expects you to start Docker Desktop first.
+
+Check CLI capabilities:
+
+```powershell
+.\bin\windows\ClangParserForWin.exe --capabilities --json
+```
+
+Typical two-step direct flow:
+
+```powershell
+$src = "samples\c-basic-control\sample2.c"
+$out = "Output\sample2_direct"
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+.\bin\windows\ClangParserForWin.exe `
+  unit-verify --request .\samples\c-basic-control\perfectone-request.json `
+  --output "$out\perfectone_report.json" --json
+```
+
+When you already have a generated IR from the artifact phase, run filtered
+Docker coverage directly:
+
+```powershell
+.\bin\windows\ClangParserForWin.exe --phase c-coverage --runner docker `
+  --execution-profile quick `
+  --ir "$out\ir.json" `
+  --outdir "$out" `
+  --func_regex "^(?:safe_divide|clamp_percent|update_mode)$" `
+  --coverage-engine llvm --mcdc --branch `
+  --klee-max-time 60 --klee-max-memory 4096
+```
+
+The MCP/Skill path is preferred because it creates the request JSON, source
+function filter, progress polling, residual repair prompts, and final HTML
+report automatically.
 
 ## Run Sample 1: Complex C Stress
 
@@ -148,8 +192,9 @@ A successful C run should preserve or link:
 
 ## Troubleshooting
 
-- `dockerDesktopLinuxEngine` pipe missing: start or restart Docker Desktop,
-  then rerun `scripts\doctor.ps1`.
+- `dockerDesktopLinuxEngine` pipe missing: Docker Desktop is mandatory. Start
+  Docker Desktop, or let the MCP execution path attempt automatic startup, then
+  rerun `scripts\doctor.ps1`.
 - Prepared image missing: run `scripts\setup-windows-c-prereqs.ps1 -PrepareDockerImage`.
 - LLVM MC/DC unavailable: install LLVM 21+ and ensure `C:\Program Files\LLVM\bin`
   is on `PATH`.

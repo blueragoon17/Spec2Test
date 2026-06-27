@@ -1011,8 +1011,59 @@ function inspectDockerImage(dockerCommand, image) {
     exists: result.status === 0,
     checked: true,
     exitCode: result.status ?? null,
-    error: result.status === 0 ? null : truncate(result.stderr || result.stdout || "", 1000)
+    error: result.status === 0 ? null : truncate(result.stderr || result.stdout || "", 1000),
+    daemonUnavailable: result.status !== 0 && /dockerDesktopLinuxEngine|daemon|pipe|connect|Cannot connect/i.test(`${result.stderr || ""}\n${result.stdout || ""}`)
   };
+}
+
+function dockerInfo(dockerCommand) {
+  if (!dockerCommand) return { ok: false, error: "docker command not found" };
+  const result = spawnSync(dockerCommand, ["info"], {
+    encoding: "utf8",
+    timeout: 10000,
+    windowsHide: true
+  });
+  return {
+    ok: result.status === 0,
+    exitCode: result.status ?? null,
+    error: result.status === 0 ? null : truncate(result.stderr || result.stdout || "", 1500)
+  };
+}
+
+function startDockerDesktopOnWindows() {
+  if (process.platform !== "win32") return { attempted: false, reason: "not_windows" };
+  const script = [
+    "$ErrorActionPreference='SilentlyContinue'",
+    "$svc=Get-Service -Name com.docker.service -ErrorAction SilentlyContinue",
+    "if($svc -and $svc.Status -ne 'Running'){Start-Service -Name com.docker.service}",
+    "$exe='C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'",
+    "if(Test-Path $exe){Start-Process -FilePath $exe -WindowStyle Hidden}"
+  ].join("; ");
+  const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], {
+    encoding: "utf8",
+    timeout: 30000,
+    windowsHide: true
+  });
+  return {
+    attempted: true,
+    exitCode: result.status ?? null,
+    stdout: truncate(result.stdout || "", 1000),
+    stderr: truncate(result.stderr || "", 1000)
+  };
+}
+
+function ensureDockerDaemon(dockerCommand, { autoStart = false, timeoutMs = 90000 } = {}) {
+  const before = dockerInfo(dockerCommand);
+  if (before.ok || !autoStart) return { ready: before.ok, before, autoStartAttempt: null, after: before };
+  const autoStartAttempt = startDockerDesktopOnWindows();
+  const deadline = Date.now() + timeoutMs;
+  let after = before;
+  while (Date.now() < deadline) {
+    after = dockerInfo(dockerCommand);
+    if (after.ok) break;
+    spawnSync(process.execPath, ["-e", "setTimeout(()=>{}, 3000)"], { timeout: 5000, windowsHide: true });
+  }
+  return { ready: after.ok, before, autoStartAttempt, after };
 }
 
 function dockerPreparationStatus(environment = {}, toolchain = null) {
@@ -1036,6 +1087,8 @@ function dockerPreparationStatus(environment = {}, toolchain = null) {
     ],
     dockerAvailable: Boolean(docker?.available),
     dockerCommand: docker?.command || null,
+    dockerDaemonReady: null,
+    dockerDaemonAutoStart: null,
     preparedImagePresent: null,
     baseImagePresent: null,
     firstRunWillPrepare: false,
@@ -1060,6 +1113,22 @@ function dockerPreparationStatus(environment = {}, toolchain = null) {
       ...status,
       status: "not_probed",
       message: `Docker runner was explicitly selected and uses prepared image ${PREPARED_KLEE_DOCKER_IMAGE}. If it is missing on the target host, the first run prepares it in ${DOCKER_PREP_ESTIMATE}.`
+    };
+  }
+
+  const daemon = ensureDockerDaemon(docker.command, {
+    autoStart: Boolean(env.autoStartDocker || env.dockerAutoStart),
+    timeoutMs: Number(env.dockerAutoStartTimeoutMs || 90000)
+  });
+  if (!daemon.ready) {
+    return {
+      ...status,
+      checked: true,
+      dockerDaemonReady: false,
+      dockerDaemonAutoStart: daemon.autoStartAttempt,
+      status: "docker_daemon_unavailable",
+      message: `Docker is required for Windows C coverage, but the Docker daemon is not reachable. ${daemon.autoStartAttempt ? "Automatic Docker Desktop startup was attempted but did not become ready." : "Start Docker Desktop or rerun with Docker auto-start enabled."}`,
+      inspect: { daemon }
     };
   }
 
@@ -1089,6 +1158,8 @@ function dockerPreparationStatus(environment = {}, toolchain = null) {
   return {
     ...status,
     checked: true,
+    dockerDaemonReady: true,
+    dockerDaemonAutoStart: daemon.autoStartAttempt,
     preparedImagePresent: prepared.exists,
     baseImagePresent: base.exists,
     configuredImagePresent: configured ? configured.exists : null,
@@ -1463,7 +1534,15 @@ function detectToolchainEnvironment(args = {}) {
   const buildMetadata = detectBuildMetadata(projectRoot, sourceFiles);
   const diagnostics = blockingDiagnosticsForEnvironment({ language, environment, toolchain: { ...toolchain, tools: selectedTools }, buildMetadata });
   const dockerPreparation = language === "c" ? dockerPreparationStatus(environment, { ...toolchain, tools: selectedTools }) : null;
-  if (dockerPreparation?.firstRunWillPrepare || dockerPreparation?.repeatedPrepareLikely || dockerPreparation?.status === "configured_image_missing") {
+  if (dockerPreparation?.status === "docker_daemon_unavailable") {
+    pushDiagnostic(diagnostics, {
+      severity: "error",
+      code: "docker_daemon_unavailable",
+      message: dockerPreparation.message,
+      source: "mcp",
+      blocking: true
+    });
+  } else if (dockerPreparation?.firstRunWillPrepare || dockerPreparation?.repeatedPrepareLikely || dockerPreparation?.status === "configured_image_missing") {
     diagnostics.push({
       severity: dockerPreparation.status === "configured_image_missing" ? "error" : "warning",
       code: dockerPreparation.status === "configured_image_missing" ? "docker_configured_image_missing" : "windows_docker_prepared_image_missing",
@@ -7848,7 +7927,6 @@ async function runFilteredCCoverageBlocking({ cliPath, args }) {
   const wslDirectRequested = false;
   const wslDirectDisabled = true;
   const dockerExplicit = requestedRunner !== "noop";
-  const dockerPreparationBefore = dockerPreparationStatus({ ...environment, dockerExplicit }, localToolchain);
   const runId = `c-coverage-${Date.now()}`;
 
   if (!pathExists(irPath) && args.runner !== "noop") {
@@ -7873,6 +7951,7 @@ async function runFilteredCCoverageBlocking({ cliPath, args }) {
   const selection = selectCoverageExecutionMode({ args, environment, toolchain: localToolchain, cliPath });
   const runner = selection.runner;
   const executionMode = selection.executionMode;
+  const dockerPreparationBefore = dockerPreparationStatus({ ...environment, dockerExplicit, autoStartDocker: executionMode === "docker" }, localToolchain);
   const dockerToolchain = executionMode === "docker"
     ? resolveDockerCoverageTools(coverageOptions, diagnostics)
     : null;
@@ -7994,7 +8073,7 @@ async function runFilteredCCoverageBlocking({ cliPath, args }) {
   }
   const residualTargets = await buildPerFunctionCoverageTargets(outDir, targetFunctionFilter, artifacts.coverage, C_COVERAGE_GOAL_PERCENT);
   const dockerPreparationAfter = executionMode === "docker"
-    ? dockerPreparationStatus({ ...environment, dockerExplicit: true }, localToolchain)
+    ? dockerPreparationStatus({ ...environment, dockerExplicit: true, autoStartDocker: true }, localToolchain)
     : dockerPreparationBefore;
   const dockerDiscovered = executionMode === "docker" ? parseDockerDiscoveredCount(result.stdout, result.stderr) : null;
   if (dockerDiscovered !== null && targetFunctionFilter.functionCount !== null && dockerDiscovered > targetFunctionFilter.functionCount) {
@@ -8868,6 +8947,16 @@ async function runCUnitVerifyFull({ cliPath, args }) {
       completionBlocked: true,
       message: "Previous PerfectOne C verification results were found. Ask the user whether to reuse them. The default selection is a new run."
     };
+  }
+  if (executionMode === "docker" && dockerPreparationBefore.status === "docker_daemon_unavailable") {
+    pushDiagnostic(diagnostics, {
+      severity: "error",
+      code: "docker_daemon_unavailable",
+      message: dockerPreparationBefore.message,
+      source: "mcp",
+      blocking: true,
+      details: dockerPreparationBefore
+    });
   }
   if (args.reusePreviousRun === true) {
     const selectedOutDir = path.resolve(args.previousRunOutDir || args.outDir || previousRuns.runs[0]?.outDir || request.outDir || projectRoot);

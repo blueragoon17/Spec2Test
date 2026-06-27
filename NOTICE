@@ -3,9 +3,9 @@
 Spec2Test is an Open Plugin Beta distribution for PerfectOne-based C unit
 verification workflows.
 
-The repository intentionally excludes PerfectOne CLI binaries and PerfectOne
-engine source code. Users must provide a compatible `ClangParserForWin.exe`
-or platform-specific PerfectOne CLI binary separately.
+The repository includes a Windows beta `ClangParserForWin.exe` for convenience.
+PerfectOne engine source code is not included. Other platform-specific
+PerfectOne CLI binaries must be provided separately.
 
 `samples/c-input04-complex/sample1.c` is included as a user-provided complex C
 stress sample derived from `C:\Development\TestSuite\input04\input04.c`.

@@ -38,8 +38,9 @@ function walk(dir) {
       continue;
     }
     const ext = path.extname(entry.name).toLowerCase();
-    if (forbiddenExt.has(ext)) errors.push(`forbidden binary/artifact in release: ${rel}`);
-    if (statSync(full).size > 5 * 1024 * 1024) errors.push(`unexpected large file over 5MB: ${rel}`);
+    const allowedCli = rel === "bin/windows/ClangParserForWin.exe";
+    if (forbiddenExt.has(ext) && !allowedCli) errors.push(`forbidden binary/artifact in release: ${rel}`);
+    if (!allowedCli && statSync(full).size > 5 * 1024 * 1024) errors.push(`unexpected large file over 5MB: ${rel}`);
     if (rel !== "scripts/check-release.mjs" && [".json", ".md", ".mjs", ".js", ".ps1", ".sh"].includes(ext)) {
       const text = readFileSync(full, "utf8");
       if (placeholderPattern.test(text)) errors.push(`placeholder local/proprietary metadata remains in: ${rel}`);
@@ -49,7 +50,8 @@ function walk(dir) {
 walk(root);
 
 const plugin = JSON.parse(readFileSync(path.join(root, ".codex-plugin/plugin.json"), "utf8"));
-if (plugin.version !== "0.2.0-beta.1") errors.push(`plugin version mismatch: ${plugin.version}`);
+const version = readFileSync(path.join(root, "VERSION.txt"), "utf8").trim();
+if (plugin.version !== version) errors.push(`plugin version mismatch: ${plugin.version} != ${version}`);
 
 const readme = readFileSync(path.join(root, "README.md"), "utf8");
 for (const needle of ["samples/c-input04-complex/sample1.c", "samples/c-basic-control/sample2.c", "Embedded targets are not validated", "PerfectOne CLI binaries"]) {
