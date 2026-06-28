@@ -10,6 +10,9 @@ before publishing.
 
 `PerfectOne Assistant - Embedded C Test Harness Helper`
 
+Published GPT app:
+https://chatgpt.com/g/g-6a40a4319f288191bb295fda1af8ac9c-perfectone-assistant-c-test-harness-helper
+
 ## Positioning
 
 Use this GPT as an experimental beta helper for:

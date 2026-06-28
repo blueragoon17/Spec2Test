@@ -16,7 +16,8 @@ Official OpenAI Help Center references:
 | --- | --- |
 | Name | PerfectOne Assistant - Embedded C Test Harness Helper |
 | Category | Programming or Productivity, depending on the available GPT Store categories |
-| Visibility | GPT Store beta, after owner review |
+| Visibility | GPT Store beta |
+| Published GPT URL | https://chatgpt.com/g/g-6a40a4319f288191bb295fda1af8ac9c-perfectone-assistant-c-test-harness-helper |
 | OpenAI GPT Actions | None for beta |
 | External execution | Not supported inside the GPT; users clone the repository, register the local Codex Plugin, and run verification on their own machine |
 | GitHub Actions | Not provided for verification execution |
@@ -83,18 +84,18 @@ Important constraints:
 
 ## Publication Checklist
 
-- Builder profile is ready and acceptable for GPT Store publishing.
-- GPT description links to the GitHub repository.
-- The GPT has no custom OpenAI GPT Actions in the beta version.
-- If OpenAI GPT Actions are added later, a valid Privacy Policy URL is provided
+- [x] Builder profile is ready and acceptable for GPT Store publishing.
+- [x] GPT description links to the GitHub repository.
+- [x] The GPT has no custom OpenAI GPT Actions in the beta version.
+- [ ] If OpenAI GPT Actions are added later, a valid Privacy Policy URL is provided
   before public sharing.
-- The repository does not provide GitHub Actions workflows for verification
+- [x] The repository does not provide GitHub Actions workflows for verification
   execution.
-- The GPT is labeled experimental/beta/educational.
-- The GPT does not ask for private source code or sensitive logs.
-- The GPT does not claim ISO 26262, ASPICE, production readiness, or safety
+- [x] The GPT is labeled experimental/beta/educational.
+- [x] The GPT does not ask for private source code or sensitive logs.
+- [x] The GPT does not claim ISO 26262, ASPICE, production readiness, or safety
   certification.
-- The GitHub repository README and disclaimer are current.
+- [x] The GitHub repository README and disclaimer are current.
 
 ## Owner Review Questions
 

@@ -40,6 +40,9 @@ documentation, setup, debugging, and learning assistant only. It should direct
 users to clone this repository, register the local Codex Plugin, and run the
 actual C verification workflow on their own machine.
 
+GPT app:
+https://chatgpt.com/g/g-6a40a4319f288191bb295fda1af8ac9c-perfectone-assistant-c-test-harness-helper
+
 The public GPT must not be positioned as a safety-certification tool, ISO 26262
 or ASPICE compliance tool, production-ready verifier, or automatic completion
 path for safety-critical software verification. It should also tell users not
