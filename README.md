@@ -10,6 +10,26 @@ This beta is C-centered. Embedded targets are not validated yet. Non-C
 verification entrypoints are temporarily disabled in this beta plugin
 distribution.
 
+## Free GPT Assistant
+
+Spec2Test may also be introduced through a free public GPT named
+`PerfectOne Assistant - Embedded C Test Harness Helper`. That GPT is a
+documentation, setup, debugging, and learning assistant only. It should direct
+users to run the actual CLI/MCP/plugin workflow from this repository on their
+own machine.
+
+The public GPT must not be positioned as a safety-certification tool, ISO 26262
+or ASPICE compliance tool, production-ready verifier, or automatic completion
+path for safety-critical software verification. It should also tell users not
+to paste private source code, sensitive logs, credentials, license files,
+customer data, or organization-specific paths into the public chat. Use
+redacted, minimal, generic excerpts when asking for setup or error-log help.
+
+See `docs/perfectone-assistant-gpt.md` for suggested GPT Store description,
+instructions, and safety wording.
+See `docs/openai-gpt-store-beta-review.md` for the review checklist before
+publishing the free GPT beta.
+
 ## Supported Matrix
 
 | Area | Beta status |
@@ -171,6 +191,9 @@ Use a new run. Run Docker filtered KLEE baseline first, then Windows local LLVM 
 Success is judged against the 100% coverage goal and by whether residual gaps,
 UB/ASAN findings, testcase I/O, and coverage limits are reported clearly. This
 sample does not use a historical coverage number as the acceptance target.
+The 2026-06-28 local beta stress run is summarized in
+`docs/input04-beta-e2e-20260628.md`. Treat that result as engineering evidence
+for the beta package, not as a coverage guarantee or certification claim.
 
 ## Run Sample 2: Basic Control
 
