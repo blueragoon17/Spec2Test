@@ -29,7 +29,7 @@ Use this skill for C targets only. For `.cc`, `.cpp`, `.cxx`, or non-C files, do
 6. Run C coverage before coding-agent residual repair:
    - On Windows, use `runner: "auto"` with `runnerPolicy: "os-default"`; MCP must select Docker for the PerfectOne KLEE baseline.
    - On Linux or macOS, use `runner: "auto"` with `runnerPolicy: "os-default"`; MCP should select native PerfectOne+KLEE/LLVM first and must not automatically fall back to Docker.
-   - WSL is disabled for this plugin path because artifact synchronization overhead is too high. Do not request `runner: "wsl"`, `--wsl-distro`, or `--wsl-path-mode`.
+   - WSL is disabled for this plugin path because artifact synchronization overhead is too high. Do not request `runner: "wsl"`, `--wsl-distro`, or `--wsl-path-mode`, and do not recommend WSL/Ubuntu LLVM setup for Windows beta users.
    - Docker setup/image preparation belongs to `executionProfile: "setup"` or an explicit operations request. Quick/full execution should reuse the prepared image and must not rebuild/pull on every run.
    - If Docker is missing on Windows, report the install command before declaring the blocker:
      ```powershell
@@ -83,7 +83,8 @@ Use this skill for C targets only. For `.cc`, `.cpp`, `.cxx`, or non-C files, do
 Windows local residual MC/DC path (first after KLEE baseline):
 
 - Use this after the PerfectOne KLEE baseline for Coding Agent residual harnesses and testcase augmentation.
-- Required tools: LLVM 21 or newer `clang.exe`, version-matched `lld-link.exe`, `llvm-profdata.exe`, and `llvm-cov.exe`.
+- Required tools: Windows local LLVM 21 or newer `clang.exe`, version-matched `lld-link.exe`, `llvm-profdata.exe`, and `llvm-cov.exe`.
+- This Windows local LLVM toolchain is residual-only. The Docker prepared image owns the Linux LLVM/KLEE baseline environment. Do not tell users to install LLVM inside WSL for this beta.
 - Probe with `unitverify_detect_toolchain_environment`. If `cResidualExecutionStrategy.windowsLocalMcdc.available` is false, call `unitverify_prepare_windows_local_mcdc` without `installApproved` and ask the user whether to install LLVM for Windows. Only call it again with `installApproved: true` after explicit user approval.
 - Compile template:
   ```powershell

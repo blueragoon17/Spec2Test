@@ -70,8 +70,13 @@ codex plugin marketplace add https://github.com/blueragoon17/Spec2Test.git --ref
 | Category | Engineering |
 | Description | Local C unit design and verification with PerfectOne CLI, Docker KLEE baseline, Windows LLVM residual MC/DC coverage, and HTML evidence reports. |
 | Execution | Local only |
-| Required local tools | Docker Desktop, prepared KLEE image, LLVM 21+, Node.js 18+ |
+| Required local tools | Docker Desktop, prepared KLEE image, Windows local LLVM 21+ for residual coverage, Node.js 18+ |
 | Beta limitations | Embedded unvalidated, non-C disabled, WSL disabled, GitHub Actions not provided |
+
+Windows setup guidance must be Docker-first. Do not tell users to install WSL
+or Ubuntu LLVM for this beta. The prepared Docker image owns the Linux
+LLVM/KLEE baseline environment; Windows local LLVM 21+ owns residual native
+coverage only.
 
 ## Review Checklist
 
@@ -88,6 +93,9 @@ codex plugin marketplace add https://github.com/blueragoon17/Spec2Test.git --ref
 - The repository includes no generated `.perfectone`, `Output`, `.profraw`,
   `.profdata`, `.ktest`, or accidental run artifacts.
 - README and docs do not tell users to run verification through GitHub Actions.
+- README and docs do not recommend WSL/Ubuntu LLVM for Windows beta setup.
+- README and docs explain the difference between Docker image LLVM 18 and
+  Windows local LLVM 21+ residual coverage.
 - README and docs do not claim ISO 26262, ASPICE, safety certification,
   production readiness, or safety-critical verification completion.
 

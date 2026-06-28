@@ -14,6 +14,11 @@ machine. The GitHub repository provides the plugin package, scripts, schemas,
 samples, and documentation. It does not provide a GitHub Actions workflow for
 running verification jobs.
 
+For Windows C beta setup, Docker Desktop is the primary and mandatory runtime.
+Do not install or use WSL for this plugin path. Earlier WSL experiments were
+disabled because artifact synchronization and host/guest process overhead made
+interactive coverage runs much slower.
+
 ## Which Interface Should I Use?
 
 | Interface | What it does | What it does not do |
@@ -62,8 +67,9 @@ Codex Plugin publication/review checklist.
 | --- | --- |
 | Windows C artifact generation | Supported with bundled `bin/windows/ClangParserForWin.exe` |
 | Windows C KLEE baseline | Supported through required Docker Desktop |
-| Windows C residual MC/DC | Supported with LLVM 21+ and `lld-link.exe` |
-| WSL execution | Disabled |
+| Docker/container LLVM | Provided by the prepared Docker image for KLEE baseline and baseline MC/DC |
+| Windows local LLVM | LLVM 21+ with `lld-link.exe`, used for Coding Agent residual native replay and MC/DC |
+| WSL execution | Disabled and not recommended |
 | GitHub Actions execution | Not provided; use local execution |
 | Embedded C | Unvalidated beta, setup blocker until target context is provided |
 | C++, JS/TS, Rust, Python, Go, Java, C#, Ruby | Temporarily disabled |
@@ -79,7 +85,19 @@ Codex Plugin publication/review checklist.
 - Docker base image `klee/klee:v3.2`.
 - Prepared image `perfectone/klee-coverage-tools:llvm18-lcov-v1`.
 - Windows LLVM 21 or newer: `clang.exe`, `lld-link.exe`, `llvm-cov.exe`,
-  and `llvm-profdata.exe`.
+  and `llvm-profdata.exe`. This is a Windows local residual coverage toolchain,
+  not a WSL/Ubuntu toolchain.
+
+LLVM is intentionally split:
+
+- Docker image LLVM 18: used inside the prepared container for PerfectOne KLEE
+  baseline coverage and MC/DC evidence.
+- Windows local LLVM 21+: used after the Docker baseline for generated residual
+  harness compile/replay/coverage aggregation with `lld-link.exe`.
+
+Do not prepare WSL/Ubuntu LLVM for this beta. If another assistant or older
+note recommends WSL setup for Spec2Test on Windows, ignore that for this
+release.
 
 ## Codex Plugin Local Install
 
@@ -126,8 +144,16 @@ runs locally on your machine.
 
 ## Prepare Windows C Environment
 
+Recommended setup order:
+
+1. Install and start Docker Desktop with the Linux engine.
+2. Prepare the PerfectOne KLEE coverage Docker image.
+3. Install Windows local LLVM 21+ only for residual native MC/DC coverage.
+4. Run `scripts\doctor.ps1`.
+
 Run the setup script only when you want it to install or prepare prerequisites.
-Without install flags, use `doctor.ps1` for diagnosis only.
+Without install flags, use `doctor.ps1` for diagnosis only. Do not install WSL
+or Ubuntu LLVM for this beta.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows-c-prereqs.ps1 -PrepareDockerImage
@@ -151,6 +177,9 @@ LLVM install command used by the setup script:
 ```powershell
 winget install --id LLVM.LLVM -e --source winget --accept-package-agreements --accept-source-agreements
 ```
+
+This installs Windows local LLVM. It is not a replacement for Docker KLEE and
+does not mean WSL should be installed.
 
 ## PerfectOne CLI Location
 
@@ -337,8 +366,9 @@ process.
   rerun `scripts\doctor.ps1`.
 - Prepared image missing: run `scripts\setup-windows-c-prereqs.ps1 -PrepareDockerImage`.
 - LLVM MC/DC unavailable: install LLVM 21+ and ensure `C:\Program Files\LLVM\bin`
-  is on `PATH`.
-- WSL requested: this beta disables WSL for the C plugin path.
+  is on `PATH`. This is Windows local LLVM for residual coverage.
+- WSL requested: this beta disables WSL for the C plugin path. Use Docker
+  Desktop for the PerfectOne KLEE baseline instead.
 - Embedded target requested: provide compiler, sysroot, linker script, startup
   objects, defines, include/library paths, and build flags before execution.
 
