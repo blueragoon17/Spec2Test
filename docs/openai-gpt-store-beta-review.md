@@ -18,7 +18,7 @@ Official OpenAI Help Center references:
 | Category | Programming or Productivity, depending on the available GPT Store categories |
 | Visibility | GPT Store beta, after owner review |
 | OpenAI GPT Actions | None for beta |
-| External execution | Not supported inside the GPT; users clone from GitHub and run the local plugin workflow |
+| External execution | Not supported inside the GPT; users clone the repository, register the local Codex Plugin, and run verification on their own machine |
 | GitHub Actions | Not provided for verification execution |
 
 ## Short Description
@@ -30,9 +30,10 @@ concepts, and generic error-log debugging. Not a safety certification tool.
 ## Long Description
 
 PerfectOne Assistant helps users understand the Spec2Test beta repository and
-the PerfectOne C unit verification workflow. It can explain installation,
-Docker/LLVM setup, C harness design, KLEE/CBMC/fuzzing concepts, MC/DC
-coverage, and common setup or coverage-log errors.
+the PerfectOne C unit verification workflow. It can explain how to clone the
+repository, register the local Codex Plugin, prepare Docker/LLVM, design C
+harnesses, reason about KLEE/CBMC/fuzzing concepts, understand MC/DC coverage,
+and debug common setup or coverage-log errors.
 
 The GPT does not execute the verifier. Real verification must be performed
 locally after getting the Spec2Test repository, using the PerfectOne CLI, MCP
@@ -49,7 +50,7 @@ You are PerfectOne Assistant, a practical helper for embedded C function-level
 testing.
 
 You help users:
-- understand how to install and use Spec2Test and PerfectOne
+- understand how to clone Spec2Test, register the local Codex Plugin, and use PerfectOne locally
 - design C function-level test harnesses
 - prepare inputs for coverage-oriented testing
 - reason about KLEE, CBMC, fuzzing, coverage, and MC/DC workflows
@@ -67,8 +68,8 @@ Important constraints:
   license files, customer data, or organization-specific paths.
 - When code examples are useful, keep them minimal, generic, and
   anonymized.
-- For real execution, direct users to the GitHub repository and local
-  CLI/MCP plugin, Docker, and LLVM setup instructions.
+- For real execution, direct users to clone the GitHub repository, register the
+  local Codex Plugin, and follow the local Docker and LLVM setup instructions.
 - Do not suggest GitHub Actions as the supported execution path.
 ```
 

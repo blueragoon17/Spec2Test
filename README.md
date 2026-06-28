@@ -1,10 +1,9 @@
 # Spec2Test
 
-Spec2Test is an Open Plugin Beta for C unit design and verification with
-Codex-compatible MCP/Skill plugin hosts. It includes the Windows PerfectOne
-CLI beta binary, runs source-target filtered Docker KLEE coverage for C, and
-uses Windows LLVM/lld-link for residual native replay and MC/DC coverage
-evidence.
+Spec2Test is an Open Plugin Beta for local C unit design and verification. The
+main execution path is the Codex Plugin: Codex loads the bundled MCP server and
+skills, then runs the Windows PerfectOne CLI, Docker KLEE baseline, and Windows
+LLVM/lld-link residual MC/DC workflow on the user's machine.
 
 This beta is C-centered. Embedded targets are not validated yet. Non-C
 verification entrypoints are temporarily disabled in this beta plugin
@@ -15,13 +14,31 @@ machine. The GitHub repository provides the plugin package, scripts, schemas,
 samples, and documentation. It does not provide a GitHub Actions workflow for
 running verification jobs.
 
+## Which Interface Should I Use?
+
+| Interface | What it does | What it does not do |
+| --- | --- | --- |
+| GPT app | Explains Spec2Test, setup, C harness strategy, KLEE/CBMC/MC/DC concepts, and generic error logs. | Does not execute source code, Docker, PerfectOne CLI, or LLVM. |
+| Codex app with Codex Plugin | Recommended execution path. Runs the local MCP server, skills, PerfectOne CLI, Docker KLEE baseline, Windows LLVM residual coverage, and HTML reporting on your PC. | Does not upload your source to a hosted Spec2Test service. |
+| Direct CLI | Raw PerfectOne execution for users who want to call `ClangParserForWin.exe` themselves. | Does not provide Codex progress polling, residual repair guidance, or final evidence gating. |
+| GitHub Actions | Not provided in this beta. | Do not expect verification jobs to run in GitHub-hosted CI. |
+
+In short:
+
+```text
+GPT app = guide and troubleshooting assistant
+Codex Plugin = actual local verification workflow
+Direct CLI = low-level manual execution
+GitHub Actions = not provided
+```
+
 ## Free GPT Assistant
 
-Spec2Test may also be introduced through a free public GPT named
+Spec2Test may also be introduced through a free public GPT app named
 `PerfectOne Assistant - Embedded C Test Harness Helper`. That GPT is a
 documentation, setup, debugging, and learning assistant only. It should direct
-users to run the actual CLI/MCP/plugin workflow from this repository on their
-own machine.
+users to clone this repository, register the local Codex Plugin, and run the
+actual C verification workflow on their own machine.
 
 The public GPT must not be positioned as a safety-certification tool, ISO 26262
 or ASPICE compliance tool, production-ready verifier, or automatic completion
@@ -33,7 +50,8 @@ redacted, minimal, generic excerpts when asking for setup or error-log help.
 See `docs/perfectone-assistant-gpt.md` for suggested GPT Store description,
 instructions, and safety wording.
 See `docs/openai-gpt-store-beta-review.md` for the review checklist before
-publishing the free GPT beta.
+publishing the free GPT beta. See `docs/codex-plugin-beta-review.md` for the
+Codex Plugin publication/review checklist.
 
 ## Supported Matrix
 
@@ -60,7 +78,7 @@ publishing the free GPT beta.
 - Windows LLVM 21 or newer: `clang.exe`, `lld-link.exe`, `llvm-cov.exe`,
   and `llvm-profdata.exe`.
 
-## Install
+## Codex Plugin Local Install
 
 ```powershell
 git clone https://github.com/blueragoon17/Spec2Test.git
@@ -87,6 +105,9 @@ Equivalent marketplace commands for compatible Codex builds:
 codex plugin marketplace add "$env:USERPROFILE\.codex\plugins\local-marketplaces\perfectone"
 codex plugin add perfectone-unit-verify@perfectone-local
 ```
+
+This is a local Codex plugin registration. It is not a hosted SaaS install and
+does not make GitHub Actions run verification.
 
 ## Prepare Windows C Environment
 
@@ -139,6 +160,12 @@ You can use the bundled CLI without Codex/MCP when you need a raw PerfectOne
 run. Docker Desktop must be installed and running for Windows C KLEE coverage.
 If Docker Desktop is not running, the MCP path attempts to start it
 automatically; direct CLI usage expects you to start Docker Desktop first.
+
+Use direct CLI mode when you need precise command-level debugging or want to
+integrate PerfectOne into your own local scripts. Prefer the Codex Plugin for
+normal verification because it creates request files, filters source functions,
+tracks progress, manages residual coverage attempts, and builds the final HTML
+evidence report.
 
 Check CLI capabilities:
 

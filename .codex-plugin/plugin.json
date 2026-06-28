@@ -1,7 +1,7 @@
 {
   "name": "perfectone-unit-verify",
   "version": "0.2.0-beta.8",
-  "description": "Open Plugin Beta for C coverage/assertion verification with PerfectOne, source-derived C design drafts, filtered KLEE/MC/DC, and Coding Agent residual reporting.",
+  "description": "Local Codex Plugin Beta for C coverage/assertion verification with PerfectOne, Docker KLEE/MC/DC, and Windows LLVM residual reporting.",
   "author": {
     "name": "PerfectOne"
   },
@@ -25,7 +25,7 @@
   "interface": {
     "displayName": "Spec2Test",
     "shortDescription": "C coverage/assertion beta through Docker-first PerfectOne",
-    "longDescription": "Spec2Test currently ships as a C-centered Open Plugin Beta. For C targets it connects Codex to the bundled Windows PerfectOne CLI through MCP for split/stub/harness generation, source-target-filtered Docker KLEE baseline execution, MC/DC coverage evidence, Windows local LLVM/lld-link residual native replay and coverage aggregation, source-derived C design drafts, testcase I/O evidence, UB/ASAN interpretation, coverage limit pages, and polished HTML reports. Docker Desktop is mandatory for the Windows C KLEE baseline and the MCP execution path attempts to start Docker Desktop when the daemon is not reachable. WSL execution is disabled in this plugin path due to artifact synchronization overhead. Non-C execution entrypoints are temporarily disabled in this beta deployment. Embedded C targets are not validated yet and require explicit toolchain context.",
+    "longDescription": "Spec2Test currently ships as a C-centered local Codex Plugin Beta. For C targets it connects Codex to the bundled Windows PerfectOne CLI through MCP for split/stub/harness generation, source-target-filtered Docker KLEE baseline execution, MC/DC coverage evidence, Windows local LLVM/lld-link residual native replay and coverage aggregation, source-derived C design drafts, testcase I/O evidence, UB/ASAN interpretation, coverage limit pages, and polished HTML reports. The workflow runs on the user's Windows development machine. Docker Desktop is mandatory for the Windows C KLEE baseline and the MCP execution path attempts to start Docker Desktop when the daemon is not reachable. GitHub Actions verification jobs, hosted SaaS execution, OpenAI GPT Actions, and ChatGPT Apps SDK server execution are not provided in this beta. WSL execution is disabled in this plugin path due to artifact synchronization overhead. Non-C execution entrypoints are temporarily disabled in this beta deployment. Embedded C targets are not validated yet and require explicit toolchain context.",
     "developerName": "PerfectOne",
     "category": "Engineering",
     "capabilities": [
