@@ -109,6 +109,18 @@ codex plugin add perfectone-unit-verify@perfectone-local
 This is a local Codex plugin registration. It is not a hosted SaaS install and
 does not make GitHub Actions run verification.
 
+The repository also publishes a repo-scoped Codex marketplace at
+`.agents/plugins/marketplace.json`. Compatible Codex builds can add the GitHub
+repository itself as a marketplace source:
+
+```powershell
+codex plugin marketplace add https://github.com/blueragoon17/Spec2Test.git --ref main
+```
+
+After adding that marketplace source, install `perfectone-unit-verify` from the
+Spec2Test marketplace in the Codex Plugin Directory. This still installs and
+runs locally on your machine.
+
 ## Prepare Windows C Environment
 
 Run the setup script only when you want it to install or prepare prerequisites.

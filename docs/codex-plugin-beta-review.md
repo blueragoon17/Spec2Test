@@ -15,6 +15,7 @@ clone the GitHub repository, run the installer to register the plugin with
 Codex, and execute verification on their Windows development machine. It
 packages:
 
+- `.agents/plugins/marketplace.json`
 - `.codex-plugin/plugin.json`
 - `.mcp.json`
 - `mcp-server/`
@@ -54,6 +55,12 @@ codex plugin marketplace add "$env:USERPROFILE\.codex\plugins\local-marketplaces
 codex plugin add perfectone-unit-verify@perfectone-local
 ```
 
+The repository itself also exposes a repo-scoped marketplace:
+
+```powershell
+codex plugin marketplace add https://github.com/blueragoon17/Spec2Test.git --ref main
+```
+
 ## Plugin Listing Draft
 
 | Field | Draft |
@@ -71,6 +78,8 @@ codex plugin add perfectone-unit-verify@perfectone-local
 - `README.md` clearly separates GPT app, Codex Plugin, direct CLI, and GitHub
   Actions.
 - `.codex-plugin/plugin.json` has correct local execution positioning.
+- `.agents/plugins/marketplace.json` exposes `perfectone-unit-verify` as a
+  repo-scoped Codex marketplace entry.
 - `.mcp.json` points to the bundled local MCP server.
 - `scripts/doctor.ps1` reports Docker, LLVM, CLI, and stale plugin cache status.
 - `scripts/setup-windows-c-prereqs.ps1` installs or prepares prerequisites only

@@ -1,0 +1,20 @@
+{
+  "name": "spec2test",
+  "interface": {
+    "displayName": "Spec2Test"
+  },
+  "plugins": [
+    {
+      "name": "perfectone-unit-verify",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Engineering"
+    }
+  ]
+}
