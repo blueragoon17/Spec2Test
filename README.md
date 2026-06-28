@@ -10,6 +10,11 @@ This beta is C-centered. Embedded targets are not validated yet. Non-C
 verification entrypoints are temporarily disabled in this beta plugin
 distribution.
 
+Spec2Test is intended to run locally on the user's Windows development
+machine. The GitHub repository provides the plugin package, scripts, schemas,
+samples, and documentation. It does not provide a GitHub Actions workflow for
+running verification jobs.
+
 ## Free GPT Assistant
 
 Spec2Test may also be introduced through a free public GPT named
@@ -38,6 +43,7 @@ publishing the free GPT beta.
 | Windows C KLEE baseline | Supported through required Docker Desktop |
 | Windows C residual MC/DC | Supported with LLVM 21+ and `lld-link.exe` |
 | WSL execution | Disabled |
+| GitHub Actions execution | Not provided; use local execution |
 | Embedded C | Unvalidated beta, setup blocker until target context is provided |
 | C++, JS/TS, Rust, Python, Go, Java, C#, Ruby | Temporarily disabled |
 
@@ -297,7 +303,9 @@ process.
 ## Security and Write Access
 
 The public repository is readable and forkable, but `main` is protected.
-Repository changes require owner-controlled review and status checks.
+Repository changes require owner-controlled review. GitHub Actions verification
+workflows are not provided in this beta; release checks are run locally before
+publishing.
 
 ## License and CLI Notice
 

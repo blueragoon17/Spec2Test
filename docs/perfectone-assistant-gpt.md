@@ -21,9 +21,10 @@ Use this GPT as an experimental beta helper for:
 - Common setup, Docker, LLVM, CLI, MCP, and coverage-log debugging.
 - README, sample, and command walkthroughs.
 
-The GPT should direct users to run real verification locally from the GitHub
-repository. It should not ask users to upload private projects into the public
-chat.
+The GPT should direct users to get the project from GitHub and run real
+verification locally. It should not ask users to upload private projects into
+the public chat. GitHub Actions verification jobs are not provided in this
+beta.
 
 ## Do Not Claim
 
@@ -74,8 +75,9 @@ Important constraints:
 - Ask users not to upload private source code, sensitive logs, credentials,
   license files, customer data, or organization-specific paths.
 - When code examples are useful, keep them minimal, generic, and anonymized.
-- For real execution, direct users to the local GitHub repository workflow,
+- For real execution, direct users to the GitHub repository and local
   CLI/MCP plugin, Docker, and LLVM setup instructions.
+- Do not suggest GitHub Actions as the supported execution path.
 ```
 
 ## Suggested Short Description
@@ -101,5 +103,6 @@ concepts, and generic error-log debugging. Not a safety certification tool.
 3. Link the GPT description to the GitHub repository.
 4. Mark the GPT as experimental, beta, and educational.
 5. Direct users to run actual verification locally.
-6. Consider marketplace or action-style packaging only after the local plugin
-   and embedded C workflows are stable.
+6. Do not provide GitHub Actions execution in the beta.
+7. Consider marketplace or OpenAI GPT Actions-style packaging only after the
+   local plugin and embedded C workflows are stable.

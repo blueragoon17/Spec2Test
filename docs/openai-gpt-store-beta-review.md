@@ -17,8 +17,9 @@ Official OpenAI Help Center references:
 | Name | PerfectOne Assistant - Embedded C Test Harness Helper |
 | Category | Programming or Productivity, depending on the available GPT Store categories |
 | Visibility | GPT Store beta, after owner review |
-| Actions | None for beta |
-| External execution | Not supported inside the GPT; users run GitHub/local plugin workflow |
+| OpenAI GPT Actions | None for beta |
+| External execution | Not supported inside the GPT; users clone from GitHub and run the local plugin workflow |
+| GitHub Actions | Not provided for verification execution |
 
 ## Short Description
 
@@ -34,8 +35,9 @@ Docker/LLVM setup, C harness design, KLEE/CBMC/fuzzing concepts, MC/DC
 coverage, and common setup or coverage-log errors.
 
 The GPT does not execute the verifier. Real verification must be performed
-locally with the Spec2Test GitHub repository, PerfectOne CLI, MCP server,
-skills, Docker, and Windows LLVM/lld-link setup.
+locally after getting the Spec2Test repository, using the PerfectOne CLI, MCP
+server, skills, Docker, and Windows LLVM/lld-link setup. GitHub Actions
+workflows are not provided for verification execution in this beta.
 
 This GPT is experimental, beta, and educational. Generated tests, assertions,
 coverage evidence, and reports require manual engineering review.
@@ -65,8 +67,9 @@ Important constraints:
   license files, customer data, or organization-specific paths.
 - When code examples are useful, keep them minimal, generic, and
   anonymized.
-- For real execution, direct users to the local GitHub repository workflow,
+- For real execution, direct users to the GitHub repository and local
   CLI/MCP plugin, Docker, and LLVM setup instructions.
+- Do not suggest GitHub Actions as the supported execution path.
 ```
 
 ## Conversation Starters
@@ -81,9 +84,11 @@ Important constraints:
 
 - Builder profile is ready and acceptable for GPT Store publishing.
 - GPT description links to the GitHub repository.
-- The GPT has no custom Actions in the beta version.
-- If Actions are added later, a valid Privacy Policy URL is provided before
-  public sharing.
+- The GPT has no custom OpenAI GPT Actions in the beta version.
+- If OpenAI GPT Actions are added later, a valid Privacy Policy URL is provided
+  before public sharing.
+- The repository does not provide GitHub Actions workflows for verification
+  execution.
 - The GPT is labeled experimental/beta/educational.
 - The GPT does not ask for private source code or sensitive logs.
 - The GPT does not claim ISO 26262, ASPICE, production readiness, or safety
@@ -93,7 +98,7 @@ Important constraints:
 ## Owner Review Questions
 
 - Approve the GPT name?
-- Approve publishing with no Actions in beta?
+- Approve publishing with no OpenAI GPT Actions in beta?
 - Approve the short and long descriptions above?
 - Approve the safety and confidentiality wording?
 - Approve linking the GPT listing to `https://github.com/blueragoon17/Spec2Test`?
